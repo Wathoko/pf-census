@@ -1,0 +1,160 @@
+# PF Census App — Setup Guide
+
+## Overview
+
+The app uses **Google Apps Script** as its backend — a free Google service that runs code inside your Google account. This means:
+
+- No Google Cloud Console needed
+- No API keys to manage
+- Works from any phone browser
+- Takes about 5 minutes to set up
+
+---
+
+## STEP 1 — Add the Script to Your Google Sheet
+
+1. Open your Google Sheet:
+   https://docs.google.com/spreadsheets/d/1-MpfWf3JqVAxdwo59eV6wd2Lv37YN-wa/edit
+
+2. Click the menu: Extensions > Apps Script
+   (A new browser tab will open — the Apps Script editor)
+
+3. Select ALL the existing code (Ctrl+A) and DELETE it.
+
+4. Open the file Code.gs from the C:\SHINSKI\PF-Census folder on your computer.
+   Copy its entire contents and PASTE it into the Apps Script editor.
+
+5. IMPORTANT: At the top of the pasted code, check the SHEET_NAME:
+      const SHEET_NAME = 'Sheet1';
+   Look at the tab name at the bottom of your Google Sheet.
+   If it says something other than "Sheet1", update this value.
+
+6. Click Save (Ctrl+S).
+
+---
+
+## STEP 2 — Deploy as a Web App
+
+1. Click the Deploy button (top right) > New deployment
+
+2. Click the gear icon next to "Type" > Select "Web app"
+
+3. Set these options:
+   - Description:  PF Census App
+   - Execute as:   Me (your Google account)
+   - Who has access:  Anyone
+
+4. Click Deploy
+
+5. Google will ask you to AUTHORIZE the app:
+   - Click "Authorize access"
+   - Choose your Google account
+   - Click Advanced > Go to PF Census App (unsafe)
+   - Click Allow
+
+6. After authorization, copy the Web app URL shown:
+   Example: https://script.google.com/macros/s/AKfycb.../exec
+
+   SAVE THIS URL — you will need it in Step 4.
+
+---
+
+## STEP 3 — Open the App on Your Phone
+
+OPTION A: Local Network (quick test)
+   1. On your PC, open PowerShell and run:
+         cd "C:\SHINSKI\PF-Census"
+         python -m http.server 8080
+   2. Find your PC's IP: run  ipconfig  > look for IPv4 Address (e.g. 192.168.1.5)
+   3. On your phone, open Chrome and go to:  http://192.168.1.5:8080
+
+OPTION B: GitHub Pages (free, works anywhere — recommended)
+   1. Create a free account at https://github.com
+   2. Create a new repository named  pf-census
+   3. Upload all files from  C:\SHINSKI\PF-Census\
+   4. Go to Settings > Pages > Source: main branch
+   5. Your app URL will be:  https://yourusername.github.io/pf-census/
+   6. Open this URL on your phone — done!
+
+---
+
+## STEP 4 — Connect the App to Your Sheet
+
+1. Open the app on your phone/browser
+2. You will see a setup screen asking for the Apps Script URL
+3. Paste the URL you copied in Step 2
+4. Tap "Connect to Google Sheet"
+5. The app will verify the connection and show the census tracker
+
+---
+
+## STEP 5 — Install on Phone Home Screen
+
+Android (Chrome):
+   1. Open the app in Chrome
+   2. Tap the 3-dot menu
+   3. Tap "Add to Home screen"
+   4. Tap Add
+
+iPhone (Safari):
+   1. Open the app in Safari
+   2. Tap the Share button
+   3. Tap "Add to Home Screen"
+   4. Tap Add
+
+---
+
+## Using the App
+
+Voice Input (Recommended for field use):
+   1. Tap the microphone button
+   2. Speak the 4-digit PF number, e.g.:
+      - "four four two zero" gives 4420
+      - "PF four four two zero" gives 4420
+      - "44 20" gives 4420
+   3. The app automatically searches and shows the employee
+   4. Tap "Mark as PRESENT"
+
+Manual Input:
+   1. Tap the number field
+   2. Type the 4-digit PF number (e.g. 4420)
+   3. Tap the Search button or press Enter
+   4. Tap "Mark as PRESENT"
+
+---
+
+## Column Configuration (Pre-set for your sheet)
+
+   Column A = PF Number
+   Column E = Date and Time stamp
+   Column F = PRESENT status
+
+To change: tap the menu (top right) > Column Settings
+
+---
+
+## Troubleshooting
+
+Problem: "Could not connect"
+Solution: Check the Apps Script URL is correct and was deployed
+
+Problem: "PF not found"
+Solution: Check the PF number exists in Column A of your sheet
+
+Problem: Voice not working
+Solution: Use Chrome on Android or Safari on iPhone
+
+Problem: Sheet not updating
+Solution: Create a New Deployment in Apps Script after any code changes
+
+Problem: Authorization error
+Solution: Re-run authorization in Apps Script (Step 2, point 5)
+
+---
+
+IMPORTANT — Sheet Tab Name:
+If your sheet tab at the bottom is NOT named "Sheet1", update line 4 in Code.gs:
+   const SHEET_NAME = 'YourActualTabName';
+Then create a New Deployment in Apps Script.
+
+App files: C:\SHINSKI\PF-Census\

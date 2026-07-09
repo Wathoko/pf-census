@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#080d14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PF Census" />
+  <meta name="description" content="Physical File Census Tracker — mark files as present with voice or manual input" />
+  <title>PF File Census</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===== SETUP / AUTH OVERLAY ===== -->
+  <div id="auth-overlay" class="overlay active">
+    <!-- Content injected by app.js renderSetupOverlay() -->
+  </div>
+
+  <!-- ===== MAIN APP ===== -->
+  <div id="main-app" class="hidden">
+
+    <!-- ── Header ── -->
+    <header class="app-header">
+      <div class="header-left">
+        <span class="header-icon">📁</span>
+        <div>
+          <h1 class="header-title">PF Census</h1>
+          <p class="header-sheet" id="sheet-info">Connecting…</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="user-badge" id="user-badge" onclick="toggleUserMenu()" aria-label="Menu">
+          <span id="user-initial">👤</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── User Menu ── -->
+    <div id="user-menu" class="user-menu hidden" role="menu">
+      <button class="menu-item" onclick="openSettings()">⚙️ Column Settings</button>
+      <button class="menu-item" onclick="refreshData()">🔄 Refresh Data</button>
+      <hr class="menu-divider" />
+      <button class="menu-item danger" onclick="handleSignOut()">🔌 Change Sheet URL</button>
+    </div>
+
+    <!-- ── Stats Bar ── -->
+    <div class="stats-bar" role="status" aria-label="Census progress">
+      <div class="stat-item">
+        <span class="stat-value" id="stat-total" aria-label="Total files">—</span>
+        <span class="stat-label">Total</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item stat-present">
+        <span class="stat-value" id="stat-present" aria-label="Present count">0</span>
+        <span class="stat-label">Present</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item stat-session">
+        <span class="stat-value" id="stat-session" aria-label="This session count">0</span>
+        <span class="stat-label">Session</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-percent" aria-label="Percent complete">0%</span>
+        <span class="stat-label">Done</span>
+      </div>
+    </div>
+
+    <!-- ── Progress Bar ── -->
+    <div class="progress-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- ── Main Content ── -->
+    <main class="main-content" id="main-content">
+
+      <!-- Voice Input Card -->
+      <div class="card voice-card">
+        <p class="card-hint" id="voice-hint">Tap the mic and speak the PF Number</p>
+
+        <button
+          id="voice-btn"
+          class="voice-button"
+          onclick="toggleVoice()"
+          aria-label="Start voice input"
+          aria-pressed="false"
+        >
+          <div class="voice-rings">
+            <div class="ring ring-1"></div>
+            <div class="ring ring-2"></div>
+            <div class="ring ring-3"></div>
+          </div>
+          <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+          </svg>
+          <div id="voice-status-text" class="voice-status-text">TAP TO SPEAK</div>
+        </button>
+
+        <div id="transcript-display" class="transcript-display hidden" aria-live="polite">
+          <span class="transcript-label">Heard:</span>
+          <span id="transcript-text" class="transcript-text"></span>
+        </div>
+      </div>
+
+      <!-- Manual Input Card -->
+      <div class="card input-card">
+        <label class="input-label" for="pf-input">Or type the PF Number</label>
+        <div class="input-row">
+          <div class="input-wrapper">
+            <span class="input-prefix" aria-hidden="true">PF</span>
+            <input
+              type="number"
+              id="pf-input"
+              class="pf-input"
+              placeholder="e.g. 4420"
+              min="1" max="9999"
+              autocomplete="off"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              onkeydown="handleInputKey(event)"
+              oninput="clearResult()"
+              aria-label="PF Number input"
+            />
+            <button class="input-clear" id="clear-btn" onclick="clearInput()" aria-label="Clear">✕</button>
+          </div>
+          <button class="btn-search" id="search-btn" onclick="searchPF()" aria-label="Search">
+            <svg viewBox="0 0 24 24" class="search-icon-svg" aria-hidden="true">
+              <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Result Card ── -->
+      <div id="result-card" class="card result-card hidden" aria-live="polite">
+
+        <!-- Not Found -->
+        <div id="result-not-found" class="result-state hidden">
+          <div class="result-icon result-icon-error" aria-hidden="true">✕</div>
+          <h2 class="result-title">PF Not Found</h2>
+          <p class="result-sub" id="not-found-msg">No record matches this PF number.</p>
+          <button class="btn-cancel" style="margin-top:16px" onclick="clearResult()">Try Again</button>
+        </div>
+
+        <!-- Found -->
+        <div id="result-found" class="result-state hidden">
+          <div class="employee-header">
+            <div class="employee-avatar" id="emp-avatar-letter">?</div>
+            <div class="employee-info">
+              <h2 class="employee-name" id="emp-name">—</h2>
+              <p class="employee-pf" id="emp-pf">PF: —</p>
+            </div>
+            <div class="result-badge" id="current-status-badge"></div>
+          </div>
+
+          <div class="employee-details">
+            <div class="detail-row" id="dept-row">
+              <span class="detail-icon" aria-hidden="true">🏢</span>
+              <span class="detail-label">Dept</span>
+              <span class="detail-value" id="emp-dept">—</span>
+            </div>
+            <div class="detail-row" id="desig-row">
+              <span class="detail-icon" aria-hidden="true">👤</span>
+              <span class="detail-label">Designation</span>
+              <span class="detail-value" id="emp-desig">—</span>
+            </div>
+            <div class="detail-row" id="last-marked-row">
+              <span class="detail-icon" aria-hidden="true">🕐</span>
+              <span class="detail-label">Last Marked</span>
+              <span class="detail-value" id="emp-last-marked">—</span>
+            </div>
+          </div>
+
+          <div class="result-actions">
+            <button class="btn-mark-present" id="mark-btn" onclick="markPresent()">
+              <span class="mark-icon">✓</span>
+              Mark as PRESENT
+            </button>
+            <button class="btn-cancel" onclick="clearResult()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Success -->
+        <div id="result-success" class="result-state hidden">
+          <div class="result-icon result-icon-success success-pulse" aria-hidden="true">✓</div>
+          <h2 class="result-title success-text">Marked PRESENT!</h2>
+          <p class="result-sub" id="success-msg">File recorded successfully</p>
+          <p class="success-timestamp" id="success-time"></p>
+          <button class="btn-next" onclick="clearForNext()">Next File →</button>
+        </div>
+
+      </div>
+
+      <!-- ── Session Log ── -->
+      <div class="card log-card" id="log-card">
+        <div class="log-header" onclick="toggleLog()" role="button" aria-expanded="false">
+          <h3 class="log-title">📋 Session Log</h3>
+          <div class="log-meta">
+            <span id="log-count" class="log-count">0 marked</span>
+            <span class="log-toggle-icon" id="log-toggle-icon" aria-hidden="true">▼</span>
+          </div>
+        </div>
+        <div class="log-body" id="log-body">
+          <div id="log-empty" class="log-empty">No files marked yet in this session</div>
+          <ul class="log-list" id="log-list" aria-label="Session log"></ul>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ===== SETTINGS MODAL ===== -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-label="Column Settings">
+    <div class="modal-backdrop" onclick="closeSettings()"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>⚙️ Column Settings</h2>
+        <button class="modal-close" onclick="closeSettings()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Configure which column letters in your Google Sheet correspond to each field.
+          Current: PF=<strong>A</strong>, Date=<strong>E</strong>, Status=<strong>F</strong>
+        </p>
+        <div class="setting-group">
+          <label class="setting-label" for="col-pf">PF Number Column</label>
+          <input type="text" class="setting-input" id="col-pf" maxlength="2" placeholder="A" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="col-name">Employee Name Column</label>
+          <input type="text" class="setting-input" id="col-name" maxlength="2" placeholder="B" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="col-dept">
+            Department Column <span class="optional">(optional)</span>
+          </label>
+          <input type="text" class="setting-input" id="col-dept" maxlength="2" placeholder="C" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="col-desig">
+            Designation Column <span class="optional">(optional)</span>
+          </label>
+          <input type="text" class="setting-input" id="col-desig" maxlength="2" placeholder="D" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="col-datetime">Date &amp; Time Column</label>
+          <input type="text" class="setting-input" id="col-datetime" maxlength="2" placeholder="E" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="col-status">PRESENT Status Column</label>
+          <input type="text" class="setting-input" id="col-status" maxlength="2" placeholder="F" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="sheet-name-input">Sheet Tab Name</label>
+          <input type="text" class="setting-input" id="sheet-name-input" placeholder="Sheet1" style="text-transform:none" />
+        </div>
+        <div class="setting-group">
+          <label class="setting-label" for="header-row-input">Header Row Number</label>
+          <input type="number" class="setting-input" id="header-row-input" min="1" max="10" placeholder="1" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeSettings()">Cancel</button>
+        <button class="btn-primary" onclick="saveSettings()">Save &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOAST CONTAINER ===== -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- ===== LOADING OVERLAY ===== -->
+  <div id="loading-overlay" class="loading-overlay hidden" aria-busy="true">
+    <div class="loading-spinner"></div>
+    <p id="loading-text" class="loading-text">Loading…</p>
+  </div>
+
+  <!-- Scripts -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
