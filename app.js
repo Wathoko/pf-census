@@ -321,20 +321,20 @@ function showFoundResult(data) {
   }
 
   // Detail rows
-  const deptRow = document.getElementById('dept-row');
-  if (data.department) {
-    deptRow.classList.remove('hidden');
-    document.getElementById('emp-dept').textContent = data.department;
+  const statusRow = document.getElementById('status-row');
+  if (data.hrStatus) {
+    statusRow.classList.remove('hidden');
+    document.getElementById('emp-hr-status').textContent = data.hrStatus;
   } else {
-    deptRow.classList.add('hidden');
+    statusRow.classList.add('hidden');
   }
 
-  const desigRow = document.getElementById('desig-row');
-  if (data.designation) {
-    desigRow.classList.remove('hidden');
-    document.getElementById('emp-desig').textContent = data.designation;
+  const phoneRow = document.getElementById('phone-row');
+  if (data.phone) {
+    phoneRow.classList.remove('hidden');
+    document.getElementById('emp-phone').textContent = data.phone;
   } else {
-    desigRow.classList.add('hidden');
+    phoneRow.classList.add('hidden');
   }
 
   const lastRow = document.getElementById('last-marked-row');

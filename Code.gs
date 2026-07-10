@@ -1,34 +1,40 @@
 // ============================================================
 // Code.gs  –  Google Apps Script Backend for PF Census App
 // ============================================================
-// HOW TO INSTALL:
+// HOW TO USE:
 //   1. Open your Google Sheet
 //   2. Click Extensions > Apps Script
-//   3. Delete any existing code and paste this entire file
-//   4. Click Save, then Deploy > New deployment
-//   5. Web app | Execute as: Me | Who has access: Anyone
+//   3. Delete all existing code, paste this entire file
+//   4. Click Save (Ctrl+S)
+//   5. Click Deploy > New deployment > Web app
+//      Execute as: Me | Who has access: Anyone
+//   6. Copy the new Web app URL into the mobile app
 // ============================================================
 
-// ── Configuration ─────────────────────────────────────────────
-const SPREADSHEET_ID  = '1-MpfWf3JqVAxdwo59eV6wd2Lv37YN-wa';
-const SHEET_NAME      = 'Sheet1';     // ← Your main biodata sheet tab name
-const HISTORY_SHEET   = 'Census History'; // ← Auto-created history tab name
-const HEADER_ROW      = 1;
-const DATA_START_ROW  = 2;
+// ── Configuration ──────────────────────────────────────────────
+// ⚠ SPREADSHEET ID: copy from your sheet's browser URL bar
+//   URL looks like: docs.google.com/spreadsheets/d/XXXXX/edit
+//   Paste the XXXXX part below:
+const SPREADSHEET_ID = '1OYm38agHG4Dg6Dlxmv_8atXKuqF_da4jCksmNBBKLDY';
+const SHEET_NAME     = 'Employee Biodata'; // ← exact tab name at bottom of your sheet
+const HISTORY_SHEET  = 'Census History';   // auto-created log tab
+const DATA_START_ROW = 2;                  // row 1 = headers, data starts row 2
 
-// Column numbers in the MAIN sheet (1=A, 2=B … 10=J)
-const COL_PF       = 1;   // A – PF Number
-const COL_NAME     = 2;   // B – Employee Name
-const COL_DEPT     = 3;   // C – Department
-const COL_DESIG    = 4;   // D – Designation
-const COL_DATETIME = 5;   // E – Date & Time of last mark
-const COL_STATUS   = 6;   // F – Last status (PRESENT/ABSENT)
-const COL_FILE_ACT = 7;   // G – File Status (ACTIVE / EXIT)
-const COL_CUSTODY  = 8;   // H – Custody location
-const COL_ROUND    = 9;   // I – Last census month (e.g. "July 2026")
-const COL_FLAG     = 10;  // J – Census flag (PRESENT / MISSING)
+// ── Column numbers (1=A, 2=B, 3=C …) ──────────────────────────
+// READ-ONLY columns (already in your sheet):
+const COL_PF          = 1;  // A – PF Number
+const COL_HR_STATUS   = 2;  // B – HR Status (Active / Exited)
+const COL_NAME        = 3;  // C – Employee Name
+const COL_PHONE       = 4;  // D – Phone Number
 
-// ── GET handler ───────────────────────────────────────────────
+// WRITE columns (app fills these in during census):
+const COL_DATETIME    = 5;  // E – Date & Time of last mark
+const COL_PRESENT     = 6;  // F – PRESENT status
+const COL_CUSTODY     = 7;  // G – Custody location
+const COL_ROUND       = 8;  // H – Census month (e.g. "July 2026")
+const COL_FLAG        = 9;  // I – Census flag: PRESENT or MISSING
+
+// ── GET handler ────────────────────────────────────────────────
 function doGet(e) {
   const action = (e.parameter.action || 'ping').toLowerCase();
   try {
@@ -43,14 +49,14 @@ function doGet(e) {
   }
 }
 
-// ── POST handler ──────────────────────────────────────────────
+// ── POST handler ───────────────────────────────────────────────
 function doPost(e) {
   try {
-    const data   = JSON.parse(e.postData.contents || '{}');
-    const action = (data.action || '').toLowerCase();
+    const body   = JSON.parse(e.postData.contents || '{}');
+    const action = (body.action || '').toLowerCase();
     let result;
-    if      (action === 'mark')  result = markPresent(data);
-    else if (action === 'audit') result = runAudit(data.round || currentMonth());
+    if      (action === 'mark')  result = markPresent(body);
+    else if (action === 'audit') result = runAudit(body.round || currentMonth());
     else                         result = { error: 'Unknown action: ' + action };
     return jsonOk(result);
   } catch (err) {
@@ -58,195 +64,179 @@ function doPost(e) {
   }
 }
 
-// ── Current Month helper ──────────────────────────────────────
-// Returns e.g. "July 2026"
+// ── Returns current month label e.g. "July 2026" ───────────────
 function currentMonth() {
-  const now = new Date();
-  return Utilities.formatDate(now, Session.getScriptTimeZone(), 'MMMM yyyy');
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMMM yyyy');
 }
 
-// ── Search for a PF number ────────────────────────────────────
+// ── Search for a PF number ─────────────────────────────────────
 function searchPF(pfInput) {
   if (!pfInput) return { found: false, error: 'No PF number provided' };
-  const sheet = getSheet(SHEET_NAME);
+
+  const sheet = getMainSheet();
   const data  = sheet.getDataRange().getValues();
-  const query = normalize(pfInput);
+  const query = normalizePF(pfInput);
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const rowPF = normalize(String(data[i][COL_PF - 1]));
-    if (rowPF === query || rowPF === padPF(query)) {
-      const status   = normalize(data[i][COL_STATUS   - 1] || '');
-      const fileAct  = normalize(data[i][COL_FILE_ACT - 1] || 'ACTIVE') || 'ACTIVE';
-      const custody  = normalize(data[i][COL_CUSTODY  - 1] || 'REGISTRY') || 'REGISTRY';
-      const lastDT   = data[i][COL_DATETIME - 1];
-      const flag     = normalize(data[i][COL_FLAG     - 1] || '');
-      const round    = String(data[i][COL_ROUND - 1] || '').trim();
+    const rowPF = normalizePF(String(data[i][COL_PF - 1]));
+    if (rowPF !== query) continue;
 
-      return {
-        found:        true,
-        rowIndex:     i + 1,
-        pf:           String(data[i][COL_PF    - 1]).trim(),
-        name:         String(data[i][COL_NAME  - 1] || '').trim(),
-        department:   String(data[i][COL_DEPT  - 1] || '').trim(),
-        designation:  String(data[i][COL_DESIG - 1] || '').trim(),
-        status:       status,
-        isPresent:    status === 'PRESENT',
-        lastDateTime: lastDT ? formatDate(lastDT) : '',
-        fileStatus:   fileAct,
-        custody:      custody,
-        flag:         flag,
-        lastRound:    round,
-      };
-    }
+    const hrStatus  = String(data[i][COL_HR_STATUS - 1] || '').trim();
+    const name      = String(data[i][COL_NAME      - 1] || '').trim();
+    const phone     = String(data[i][COL_PHONE     - 1] || '').trim();
+    const lastDT    = data[i][COL_DATETIME - 1];
+    const present   = String(data[i][COL_PRESENT   - 1] || '').trim().toUpperCase();
+    const custody   = String(data[i][COL_CUSTODY   - 1] || 'REGISTRY').trim().toUpperCase();
+    const round     = String(data[i][COL_ROUND     - 1] || '').trim();
+    const flag      = String(data[i][COL_FLAG      - 1] || '').trim().toUpperCase();
+
+    return {
+      found:        true,
+      pf:           String(data[i][COL_PF - 1]).trim(),
+      name:         name,
+      hrStatus:     hrStatus,   // Active / Exited (from Column B)
+      phone:        phone,
+      isPresent:    present === 'PRESENT',
+      lastDateTime: lastDT ? formatDate(lastDT) : '',
+      custody:      custody || 'REGISTRY',
+      lastRound:    round,
+      flag:         flag,
+    };
   }
+
   return { found: false, pf: pfInput };
 }
 
-// ── Mark a PF as PRESENT ──────────────────────────────────────
+// ── Mark a PF as PRESENT ───────────────────────────────────────
 function markPresent(params) {
-  const pfInput    = params.pf;
-  const fileStatus = params.fileStatus || 'ACTIVE';
-  const custody    = params.custody    || 'REGISTRY';
-  const round      = params.round      || currentMonth();
+  const pfInput = params.pf;
+  const custody = (params.custody || 'REGISTRY').toString().trim().toUpperCase();
+  const round   = (params.round   || currentMonth()).toString().trim();
 
   if (!pfInput) return { success: false, error: 'No PF number provided' };
 
-  const sheet = getSheet(SHEET_NAME);
+  const sheet = getMainSheet();
   const data  = sheet.getDataRange().getValues();
   const tz    = Session.getScriptTimeZone();
   const now   = new Date();
-  const timestamp = Utilities.formatDate(now, tz, 'dd/MM/yyyy HH:mm:ss');
-  const query = normalize(pfInput);
+  const ts    = Utilities.formatDate(now, tz, 'dd/MM/yyyy HH:mm:ss');
+  const query = normalizePF(pfInput);
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const rowPF = normalize(String(data[i][COL_PF - 1]));
-    if (rowPF === query || rowPF === padPF(query)) {
-      const name = String(data[i][COL_NAME - 1] || '').trim();
+    const rowPF = normalizePF(String(data[i][COL_PF - 1]));
+    if (rowPF !== query) continue;
 
-      // Write to main sheet
-      sheet.getRange(i + 1, COL_DATETIME).setValue(timestamp);
-      sheet.getRange(i + 1, COL_STATUS).setValue('PRESENT');
-      sheet.getRange(i + 1, COL_FILE_ACT).setValue(fileStatus);
-      sheet.getRange(i + 1, COL_CUSTODY).setValue(custody);
-      sheet.getRange(i + 1, COL_ROUND).setValue(round);
-      sheet.getRange(i + 1, COL_FLAG).setValue('PRESENT');
+    const name    = String(data[i][COL_NAME - 1] || '').trim();
+    const hrStatus = String(data[i][COL_HR_STATUS - 1] || '').trim();
 
-      // Append to history sheet for permanent tracking
-      logToHistory(pfInput, name, fileStatus, custody, round, timestamp);
+    // Write census data to the sheet immediately
+    sheet.getRange(i + 1, COL_DATETIME).setValue(ts);
+    sheet.getRange(i + 1, COL_PRESENT).setValue('PRESENT');
+    sheet.getRange(i + 1, COL_CUSTODY).setValue(custody);
+    sheet.getRange(i + 1, COL_ROUND).setValue(round);
+    sheet.getRange(i + 1, COL_FLAG).setValue('PRESENT');
 
-      SpreadsheetApp.flush();
+    // Force Google Sheets to write immediately (real-time update fix)
+    SpreadsheetApp.flush();
 
-      return {
-        success:    true,
-        pf:         String(data[i][COL_PF - 1]).trim(),
-        name:       name,
-        timestamp:  timestamp,
-        fileStatus: fileStatus,
-        custody:    custody,
-        round:      round,
-        row:        i + 1,
-      };
-    }
+    // Log to history tab
+    logToHistory(String(data[i][COL_PF - 1]).trim(), name, hrStatus, custody, round, ts);
+
+    return {
+      success:   true,
+      pf:        String(data[i][COL_PF - 1]).trim(),
+      name:      name,
+      timestamp: ts,
+      custody:   custody,
+      round:     round,
+    };
   }
-  return { success: false, error: 'PF not found: ' + pfInput };
+
+  return { success: false, error: 'PF ' + pfInput + ' not found in sheet' };
 }
 
-// ── Log every mark event to "Census History" sheet ────────────
-function logToHistory(pf, name, fileStatus, custody, round, timestamp) {
+// ── Append every mark to the Census History tab ────────────────
+function logToHistory(pf, name, hrStatus, custody, round, timestamp) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     let hist = ss.getSheetByName(HISTORY_SHEET);
-
-    // Create the history sheet if it doesn't exist
     if (!hist) {
       hist = ss.insertSheet(HISTORY_SHEET);
       hist.appendRow(['Timestamp', 'PF Number', 'Employee Name',
-                      'File Status', 'Custody', 'Census Month']);
+                      'HR Status', 'Custody', 'Census Month']);
       hist.getRange(1, 1, 1, 6).setFontWeight('bold');
     }
-
-    hist.appendRow([timestamp, pf, name, fileStatus, custody, round]);
+    hist.appendRow([timestamp, pf, name, hrStatus, custody, round]);
   } catch (e) {
-    // History logging failure should not block marking
     Logger.log('History log error: ' + e.message);
   }
 }
 
-// ── Run Audit: flag active files missing in the current month ──
+// ── Audit: flag ACTIVE files not yet seen this month as MISSING ─
 function runAudit(currentRound) {
-  const sheet = getSheet(SHEET_NAME);
+  const sheet = getMainSheet();
   const data  = sheet.getDataRange().getValues();
-  let flaggedCount = 0;
-  let alreadyPresent = 0;
+  let flagged = 0, alreadyPresent = 0;
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const pf      = String(data[i][COL_PF      - 1]).trim();
-    const fileAct = normalize(data[i][COL_FILE_ACT - 1] || 'ACTIVE') || 'ACTIVE';
-    const rowRound = String(data[i][COL_ROUND   - 1] || '').trim();
-    const flag     = normalize(data[i][COL_FLAG  - 1] || '');
+    const pf       = String(data[i][COL_PF - 1]).trim();
+    const hrStatus = String(data[i][COL_HR_STATUS - 1] || '').trim().toLowerCase();
+    const rowRound = String(data[i][COL_ROUND - 1] || '').trim();
+    const flag     = String(data[i][COL_FLAG  - 1] || '').trim().toUpperCase();
 
     if (!pf) continue;
-
-    // Only audit ACTIVE files
-    if (fileAct !== 'ACTIVE') continue;
+    if (hrStatus === 'exited') continue; // Skip exited employees
 
     if (rowRound === currentRound && flag === 'PRESENT') {
       alreadyPresent++;
     } else {
-      // Not seen in this month's census → MISSING
       sheet.getRange(i + 1, COL_FLAG).setValue('MISSING');
-      flaggedCount++;
+      flagged++;
     }
   }
 
   SpreadsheetApp.flush();
-  return { success: true, flaggedCount: flaggedCount, alreadyPresent: alreadyPresent };
+  return { success: true, flaggedCount: flagged, alreadyPresent: alreadyPresent };
 }
 
-// ── Get census statistics for the given month ─────────────────
+// ── Get census statistics ──────────────────────────────────────
 function getStats(round) {
-  const sheet = getSheet(SHEET_NAME);
+  const sheet = getMainSheet();
   const data  = sheet.getDataRange().getValues();
   let total = 0, present = 0, missing = 0;
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const pf = String(data[i][COL_PF - 1]).trim();
-    if (!pf) continue;
+    const pf       = String(data[i][COL_PF - 1]).trim();
+    const hrStatus = String(data[i][COL_HR_STATUS - 1] || '').trim().toLowerCase();
+    if (!pf || hrStatus === 'exited') continue;
     total++;
 
     const rowRound = String(data[i][COL_ROUND - 1] || '').trim();
-    const flag     = normalize(data[i][COL_FLAG - 1] || '');
+    const flag     = String(data[i][COL_FLAG  - 1] || '').trim().toUpperCase();
 
-    if (rowRound === round && flag === 'PRESENT') {
-      present++;
-    } else if (flag === 'MISSING') {
-      missing++;
-    }
+    if (rowRound === round && flag === 'PRESENT') present++;
+    else if (flag === 'MISSING') missing++;
   }
 
   return {
     total:   total,
     present: present,
     missing: missing,
-    absent:  total - present - missing,
     percent: total > 0 ? Math.round((present / total) * 100) : 0,
     round:   round,
   };
 }
 
-// ── Utilities ──────────────────────────────────────────────────
-function getSheet(name) {
+// ── Helpers ────────────────────────────────────────────────────
+function getMainSheet() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return ss.getSheetByName(name) || ss.getSheets()[0];
+  return ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
 }
 
-function normalize(str) {
-  return String(str).trim().toUpperCase();
-}
-
-function padPF(str) {
-  if (/^\d+$/.test(str)) return str.padStart(4, '0');
-  return str;
+// Normalize PF: trim, uppercase, pad numbers to 4 digits
+function normalizePF(raw) {
+  const s = String(raw).trim().toUpperCase();
+  return /^\d+$/.test(s) ? s.padStart(4, '0') : s;
 }
 
 function formatDate(val) {
@@ -263,8 +253,8 @@ function jsonOk(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function jsonError(message) {
+function jsonError(msg) {
   return ContentService
-    .createTextOutput(JSON.stringify({ ok: false, error: message }))
+    .createTextOutput(JSON.stringify({ ok: false, error: msg }))
     .setMimeType(ContentService.MimeType.JSON);
 }
