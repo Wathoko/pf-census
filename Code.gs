@@ -18,12 +18,16 @@ const HEADER_ROW      = 1;
 const DATA_START_ROW  = 2;
 
 // Column numbers (1 = A, 2 = B, 3 = C, 4 = D, 5 = E, 6 = F …)
-const COL_PF       = 1;  // A  – PF Number
-const COL_NAME     = 2;  // B  – Employee Name
-const COL_DEPT     = 3;  // C  – Department
-const COL_DESIG    = 4;  // D  – Designation
-const COL_DATETIME = 5;  // E  – Date & Time stamp
-const COL_STATUS   = 6;  // F  – PRESENT / ABSENT
+const COL_PF       = 1;  // A – PF Number
+const COL_NAME     = 2;  // B – Employee Name
+const COL_DEPT     = 3;  // C – Department
+const COL_DESIG    = 4;  // D – Designation
+const COL_DATETIME = 5;  // E – Date & Time stamp
+const COL_STATUS   = 6;  // F – PRESENT / ABSENT
+const COL_FILE_ACT = 7;  // G – File Status (ACTIVE / EXIT)
+const COL_CUSTODY  = 8;  // H – Custody (CEOS OFFICE, etc.)
+const COL_ROUND    = 9;  // I – Census Round (1st Census, 2nd Census)
+const COL_FLAG     = 10; // J – Census Flag (PRESENT / MISSING)
 
 // ── CORS Headers helper ───────────────────────────────────────
 function corsHeaders() {
@@ -41,8 +45,7 @@ function doGet(e) {
   try {
     let result;
     if      (action === 'search') result = searchPF(e.parameter.pf || '');
-    else if (action === 'stats')  result = getStats();
-    else if (action === 'list')   result = getMarkedList();
+    else if (action === 'stats')  result = getStats(e.parameter.round || '1st Census');
     else if (action === 'ping')   result = { status: 'ok', message: 'PF Census backend is running ✓' };
     else                          result = { error: 'Unknown action: ' + action };
     return jsonOk(result);
@@ -58,8 +61,8 @@ function doPost(e) {
     const action = (data.action || '').toLowerCase();
 
     let result;
-    if      (action === 'mark')   result = markPresent(data.pf || '', data.markedBy || '');
-    else if (action === 'unmark') result = unmarkPF(data.pf || '');
+    if      (action === 'mark')   result = markPresent(data);
+    else if (action === 'audit')  result = runAudit(data.round || '2nd Census');
     else                          result = { error: 'Unknown action: ' + action };
 
     return jsonOk(result);
@@ -79,18 +82,27 @@ function searchPF(pfInput) {
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
     const rowPF = normalize(String(data[i][COL_PF - 1]));
     if (rowPF === query || rowPF === padPF(query)) {
-      const status    = String(data[i][COL_STATUS - 1] || '').toUpperCase().trim();
-      const lastDT    = data[i][COL_DATETIME - 1];
+      const status     = String(data[i][COL_STATUS - 1] || '').toUpperCase().trim();
+      const fileAct    = String(data[i][COL_FILE_ACT - 1] || 'ACTIVE').toUpperCase().trim();
+      const custody    = String(data[i][COL_CUSTODY - 1] || 'REGISTRY').toUpperCase().trim();
+      const lastDT     = data[i][COL_DATETIME - 1];
+      const flag       = String(data[i][COL_FLAG - 1] || '').toUpperCase().trim();
+      const round      = String(data[i][COL_ROUND - 1] || '').trim();
+
       return {
-        found:       true,
-        rowIndex:    i + 1,
-        pf:          String(data[i][COL_PF - 1]).trim(),
-        name:        String(data[i][COL_NAME - 1]  || '').trim(),
-        department:  String(data[i][COL_DEPT - 1]  || '').trim(),
-        designation: String(data[i][COL_DESIG - 1] || '').trim(),
-        status:      status,
-        isPresent:   status === 'PRESENT',
+        found:        true,
+        rowIndex:     i + 1,
+        pf:           String(data[i][COL_PF - 1]).trim(),
+        name:         String(data[i][COL_NAME - 1]  || '').trim(),
+        department:   String(data[i][COL_DEPT - 1]  || '').trim(),
+        designation:  String(data[i][COL_DESIG - 1] || '').trim(),
+        status:       status,
+        isPresent:    status === 'PRESENT',
         lastDateTime: lastDT ? formatDate(lastDT) : '',
+        fileStatus:   fileAct,
+        custody:      custody,
+        flag:         flag,
+        round:        round
       };
     }
   }
@@ -99,7 +111,12 @@ function searchPF(pfInput) {
 }
 
 // ── Mark a PF as PRESENT ──────────────────────────────────────
-function markPresent(pfInput, markedBy) {
+function markPresent(params) {
+  const pfInput     = params.pf;
+  const fileStatus  = params.fileStatus || 'ACTIVE';
+  const custody     = params.custody || 'REGISTRY';
+  const round       = params.round || '1st Census';
+
   if (!pfInput) return { success: false, error: 'No PF number provided' };
 
   const sheet     = getSheet();
@@ -114,15 +131,22 @@ function markPresent(pfInput, markedBy) {
     if (rowPF === query || rowPF === padPF(query)) {
       sheet.getRange(i + 1, COL_DATETIME).setValue(timestamp);
       sheet.getRange(i + 1, COL_STATUS).setValue('PRESENT');
+      sheet.getRange(i + 1, COL_FILE_ACT).setValue(fileStatus);
+      sheet.getRange(i + 1, COL_CUSTODY).setValue(custody);
+      sheet.getRange(i + 1, COL_ROUND).setValue(round);
+      sheet.getRange(i + 1, COL_FLAG).setValue('PRESENT');
 
-      SpreadsheetApp.flush();   // force immediate write
+      SpreadsheetApp.flush(); // Force immediate update
 
       return {
-        success:   true,
-        pf:        String(data[i][COL_PF - 1]).trim(),
-        name:      String(data[i][COL_NAME - 1] || '').trim(),
-        timestamp: timestamp,
-        row:       i + 1,
+        success:    true,
+        pf:         String(data[i][COL_PF - 1]).trim(),
+        name:       String(data[i][COL_NAME - 1] || '').trim(),
+        timestamp:  timestamp,
+        fileStatus: fileStatus,
+        custody:    custody,
+        round:      round,
+        row:        i + 1,
       };
     }
   }
@@ -130,69 +154,61 @@ function markPresent(pfInput, markedBy) {
   return { success: false, error: 'PF not found: ' + pfInput };
 }
 
-// ── Unmark a PF (remove PRESENT status) ──────────────────────
-function unmarkPF(pfInput) {
-  if (!pfInput) return { success: false, error: 'No PF number provided' };
-
+// ── Run Audit to flag missing files ───────────────────────────
+// Flags active files that are NOT marked PRESENT in the current round
+function runAudit(currentRound) {
   const sheet = getSheet();
   const data  = sheet.getDataRange().getValues();
-  const query = normalize(pfInput);
+  let flaggedCount = 0;
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const rowPF = normalize(String(data[i][COL_PF - 1]));
-    if (rowPF === query || rowPF === padPF(query)) {
-      sheet.getRange(i + 1, COL_DATETIME).setValue('');
-      sheet.getRange(i + 1, COL_STATUS).setValue('');
-      SpreadsheetApp.flush();
-      return { success: true, pf: pfInput };
+    const pf        = String(data[i][COL_PF - 1]).trim();
+    const fileAct   = String(data[i][COL_FILE_ACT - 1] || 'ACTIVE').toUpperCase().trim();
+    const rowRound  = String(data[i][COL_ROUND - 1] || '').trim();
+    const flag      = String(data[i][COL_FLAG - 1] || '').toUpperCase().trim();
+
+    if (!pf) continue;
+
+    // If file is ACTIVE, but not marked PRESENT in the current round
+    if (fileAct === 'ACTIVE' && (rowRound !== currentRound || flag !== 'PRESENT')) {
+      sheet.getRange(i + 1, COL_FLAG).setValue('MISSING');
+      flaggedCount++;
     }
   }
 
-  return { success: false, error: 'PF not found: ' + pfInput };
+  SpreadsheetApp.flush();
+  return { success: true, flaggedCount: flaggedCount };
 }
 
 // ── Get census statistics ─────────────────────────────────────
-function getStats() {
+function getStats(round) {
   const sheet = getSheet();
   const data  = sheet.getDataRange().getValues();
 
-  let total = 0, present = 0;
+  let total = 0, present = 0, missing = 0;
 
   for (let i = DATA_START_ROW - 1; i < data.length; i++) {
     const pf = String(data[i][COL_PF - 1]).trim();
-    if (!pf || pf === '') continue;
+    if (!pf) continue;
     total++;
-    const status = String(data[i][COL_STATUS - 1] || '').toUpperCase().trim();
-    if (status === 'PRESENT') present++;
+
+    const rowRound = String(data[i][COL_ROUND - 1] || '').trim();
+    const flag     = String(data[i][COL_FLAG - 1] || '').toUpperCase().trim();
+
+    if (rowRound === round && flag === 'PRESENT') {
+      present++;
+    } else if (flag === 'MISSING') {
+      missing++;
+    }
   }
 
   return {
     total:   total,
     present: present,
+    missing: missing,
     absent:  total - present,
     percent: total > 0 ? Math.round((present / total) * 100) : 0,
   };
-}
-
-// ── Get list of all marked-present files ──────────────────────
-function getMarkedList() {
-  const sheet = getSheet();
-  const data  = sheet.getDataRange().getValues();
-  const items = [];
-
-  for (let i = DATA_START_ROW - 1; i < data.length; i++) {
-    const status = String(data[i][COL_STATUS - 1] || '').toUpperCase().trim();
-    if (status === 'PRESENT') {
-      items.push({
-        pf:         String(data[i][COL_PF - 1]).trim(),
-        name:       String(data[i][COL_NAME - 1] || '').trim(),
-        department: String(data[i][COL_DEPT - 1] || '').trim(),
-        datetime:   String(data[i][COL_DATETIME - 1] || '').trim(),
-      });
-    }
-  }
-
-  return { items: items, count: items.length };
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -206,7 +222,6 @@ function normalize(str) {
 }
 
 function padPF(str) {
-  // Pad numeric PF numbers to 4 digits: "42" → "0042"
   if (/^\d+$/.test(str)) return str.padStart(4, '0');
   return str;
 }

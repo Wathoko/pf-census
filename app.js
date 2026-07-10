@@ -6,18 +6,20 @@
 
 // ── State ─────────────────────────────────────────────────────
 const state = {
-  scriptUrl:    '',
-  sheetName:    CONFIG.SHEET_NAME,
-  columns:      { ...CONFIG.COLUMNS },
-  headerRow:    CONFIG.HEADER_ROW,
-  sessionLog:   [],
-  sessionCount: 0,
-  totalFiles:   0,
-  presentCount: 0,
-  currentResult: null,
-  isListening:   false,
-  recognition:   null,
-  logExpanded:   false,
+  scriptUrl:           '',
+  sheetName:           CONFIG.SHEET_NAME,
+  columns:             { ...CONFIG.COLUMNS },
+  headerRow:           CONFIG.HEADER_ROW,
+  sessionLog:          [],
+  sessionCount:        0,
+  totalFiles:          0,
+  presentCount:        0,
+  currentResult:       null,
+  isListening:         false,
+  recognition:         null,
+  logExpanded:         false,
+  selectedFileStatus:  'ACTIVE',
+  selectedCensusRound: '1st Census',
 };
 
 // ── Init ──────────────────────────────────────────────────────
@@ -188,9 +190,10 @@ async function apiPost(action, body = {}) {
 // ── Load Stats ────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const data = await apiFetch('stats');
+    const data = await apiFetch('stats', { round: state.selectedCensusRound });
     state.totalFiles   = data.total;
     state.presentCount = data.present;
+    state.missingCount = data.missing || 0;
     updateStatsUI();
   } catch (e) {
     console.error('Stats error:', e);
@@ -200,12 +203,12 @@ async function loadStats() {
 function updateStatsUI() {
   const total   = state.totalFiles;
   const present = state.presentCount;
-  const session = state.sessionCount;
+  const missing = state.missingCount;
   const pct     = total > 0 ? Math.round((present / total) * 100) : 0;
 
   document.getElementById('stat-total').textContent   = total   || '—';
   document.getElementById('stat-present').textContent = present;
-  document.getElementById('stat-session').textContent = session;
+  document.getElementById('stat-missing').textContent = missing;
   document.getElementById('stat-percent').textContent = pct + '%';
   document.getElementById('progress-fill').style.width = pct + '%';
 }
@@ -321,6 +324,13 @@ function showFoundResult(data) {
     lastRow.classList.add('hidden');
   }
 
+  // Pre-fill Custody and Status from database
+  setFileStatus(data.fileStatus || 'ACTIVE');
+  const custodySelect = document.getElementById('custody-select');
+  if (custodySelect) {
+    custodySelect.value = data.custody || 'REGISTRY';
+  }
+
   // Mark button
   const markBtn = document.getElementById('mark-btn');
   if (data.isPresent) {
@@ -376,10 +386,21 @@ async function markPresent() {
   if (!state.currentResult) return;
   const pf = state.currentResult.pf;
 
+  // Retrieve selected options from form
+  const fileStatus = state.selectedFileStatus;
+  const custody    = document.getElementById('custody-select')?.value || 'REGISTRY';
+  const round      = state.selectedCensusRound;
+
   showLoading('Marking PF ' + pf + ' as PRESENT…');
 
   try {
-    const data = await apiPost('mark', { pf, markedBy: 'Census App' });
+    const data = await apiPost('mark', {
+      pf,
+      fileStatus,
+      custody,
+      round,
+      markedBy: 'Census App'
+    });
     hideLoading();
 
     if (data.success) {
@@ -396,6 +417,7 @@ async function markPresent() {
         pf:        data.pf,
         name:      data.name,
         timestamp: data.timestamp,
+        custody:   data.custody,
       });
 
       // Show success state
@@ -695,3 +717,65 @@ function shortTime(ts) {
   const parts = ts.split(' ');
   return parts[1] || ts; // just show time portion
 }
+
+// ── New Phase 2 Helpers ───────────────────────────────────────
+function setFileStatus(status) {
+  state.selectedFileStatus = status;
+  const activeBtn = document.getElementById('status-active-btn');
+  const exitBtn   = document.getElementById('status-exit-btn');
+  if (activeBtn && exitBtn) {
+    if (status === 'ACTIVE') {
+      activeBtn.classList.add('active');
+      exitBtn.classList.remove('active');
+    } else {
+      activeBtn.classList.remove('active');
+      exitBtn.classList.add('active');
+    }
+  }
+}
+
+async function changeCensusRound() {
+  const select = document.getElementById('census-round-select');
+  if (select) {
+    state.selectedCensusRound = select.value;
+    showLoading('Switching round to ' + state.selectedCensusRound + '…');
+    try {
+      await loadStats();
+      hideLoading();
+      showToast('Switched to ' + state.selectedCensusRound, 'success', '📅');
+    } catch (e) {
+      hideLoading();
+      showToast('Error switching round', 'error', '✕');
+    }
+  }
+}
+
+async function triggerAudit() {
+  closeUserMenu();
+  const confirmAudit = confirm(
+    'Warning: This will audit all ACTIVE files in the sheet.\n' +
+    'Any file that is NOT marked present in the current round (' + state.selectedCensusRound + ') ' +
+    'will be flagged as MISSING. Continue?'
+  );
+  if (!confirmAudit) return;
+
+  showLoading('Running missing file audit…');
+  try {
+    const data = await apiPost('audit', { round: state.selectedCensusRound });
+    hideLoading();
+    if (data.success) {
+      await loadStats();
+      showToast(
+        'Audit complete! Flagged ' + data.flaggedCount + ' files as MISSING.',
+        'warning',
+        '⚠️'
+      );
+    } else {
+      throw new Error(data.error || 'Audit failed');
+    }
+  } catch (e) {
+    hideLoading();
+    showToast('Audit failed: ' + e.message, 'error', '✕');
+  }
+}
+

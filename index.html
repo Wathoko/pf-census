@@ -32,6 +32,12 @@
         </div>
       </div>
       <div class="header-right">
+        <!-- Census Round Toggle in Header -->
+        <select id="census-round-select" class="round-select" onchange="changeCensusRound()" aria-label="Census Round">
+          <option value="1st Census">1st Census</option>
+          <option value="2nd Census">2nd Census</option>
+        </select>
+        
         <div class="user-badge" id="user-badge" onclick="toggleUserMenu()" aria-label="Menu">
           <span id="user-initial">👤</span>
         </div>
@@ -40,6 +46,7 @@
 
     <!-- ── User Menu ── -->
     <div id="user-menu" class="user-menu hidden" role="menu">
+      <button class="menu-item" onclick="triggerAudit()">⚠️ Audit Missing Files</button>
       <button class="menu-item" onclick="openSettings()">⚙️ Column Settings</button>
       <button class="menu-item" onclick="refreshData()">🔄 Refresh Data</button>
       <hr class="menu-divider" />
@@ -58,9 +65,9 @@
         <span class="stat-label">Present</span>
       </div>
       <div class="stat-divider"></div>
-      <div class="stat-item stat-session">
-        <span class="stat-value" id="stat-session" aria-label="This session count">0</span>
-        <span class="stat-label">Session</span>
+      <div class="stat-item stat-missing">
+        <span class="stat-value" id="stat-missing" aria-label="Missing count">0</span>
+        <span class="stat-label">Missing</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
@@ -173,6 +180,28 @@
               <span class="detail-icon" aria-hidden="true">🕐</span>
               <span class="detail-label">Last Marked</span>
               <span class="detail-value" id="emp-last-marked">—</span>
+            </div>
+
+            <hr class="detail-divider">
+
+            <!-- New Fields Form for Mark Present -->
+            <div class="form-row">
+              <label class="form-label">File Status</label>
+              <div class="status-toggle-group">
+                <button type="button" class="btn-toggle active" id="status-active-btn" onclick="setFileStatus('ACTIVE')">ACTIVE</button>
+                <button type="button" class="btn-toggle" id="status-exit-btn" onclick="setFileStatus('EXIT')">EXIT</button>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label class="form-label" for="custody-select">Custody Location</label>
+              <select id="custody-select" class="form-select">
+                <option value="REGISTRY">REGISTRY</option>
+                <option value="CEOS OFFICE">CEOS OFFICE</option>
+                <option value="DIRECTOR HR OFFICE">DIRECTOR HR OFFICE</option>
+                <option value="DISCIPLINE">DISCIPLINE</option>
+                <option value="RESOURCING">RESOURCING</option>
+              </select>
             </div>
           </div>
 
