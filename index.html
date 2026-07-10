@@ -32,11 +32,8 @@
         </div>
       </div>
       <div class="header-right">
-        <!-- Census Round Toggle in Header -->
-        <select id="census-round-select" class="round-select" onchange="changeCensusRound()" aria-label="Census Round">
-          <option value="1st Census">1st Census</option>
-          <option value="2nd Census">2nd Census</option>
-        </select>
+        <!-- Auto Census Month Badge -->
+        <div class="month-badge" id="month-badge" title="Current census month"></div>
         
         <div class="user-badge" id="user-badge" onclick="toggleUserMenu()" aria-label="Menu">
           <span id="user-initial">👤</span>

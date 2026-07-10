@@ -797,28 +797,19 @@ body::before {
   border-color: var(--border-focus);
 }
 
-/* Round Select Header dropdown */
-.round-select {
-  background: var(--bg-elevated);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 28px 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  outline: none;
-  cursor: pointer;
-  margin-right: 12px;
-  transition: border-color var(--transition);
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 4px center;
-  background-size: 18px;
-}
-.round-select:focus {
-  border-color: var(--border-focus);
+/* Auto Month Badge in header */
+.month-badge {
+  background: var(--accent-dim);
+  border: 1.5px solid var(--accent);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.4px;
+  margin-right: 10px;
+  white-space: nowrap;
+  text-transform: uppercase;
 }
 
 

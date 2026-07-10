@@ -14,18 +14,29 @@ const state = {
   sessionCount:        0,
   totalFiles:          0,
   presentCount:        0,
+  missingCount:        0,
   currentResult:       null,
   isListening:         false,
   recognition:         null,
   logExpanded:         false,
   selectedFileStatus:  'ACTIVE',
-  selectedCensusRound: '1st Census',
+  selectedCensusRound: getMonthLabel(), // Auto-set to current month
 };
+
+// Returns current month label e.g. "July 2026"
+function getMonthLabel() {
+  return new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+}
 
 // ── Init ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   initVoiceRecognition();
+
+  // Always update the month badge to current month
+  state.selectedCensusRound = getMonthLabel();
+  const badge = document.getElementById('month-badge');
+  if (badge) badge.textContent = state.selectedCensusRound;
 
   if (!state.scriptUrl) {
     showSetupScreen();
@@ -154,7 +165,13 @@ function showMainApp() {
   document.getElementById('sheet-info').textContent =
     state.sheetName + ' · ' + CONFIG.SPREADSHEET_ID.slice(0, 10) + '…';
   document.getElementById('user-initial').textContent = '👤';
+
+  // Always ensure current month is set
+  state.selectedCensusRound = getMonthLabel();
+  const badge = document.getElementById('month-badge');
+  if (badge) badge.textContent = state.selectedCensusRound;
 }
+
 
 // ── API Fetch Helper ──────────────────────────────────────────
 async function apiFetch(action, params = {}) {
@@ -203,14 +220,18 @@ async function loadStats() {
 function updateStatsUI() {
   const total   = state.totalFiles;
   const present = state.presentCount;
-  const missing = state.missingCount;
+  const missing = state.missingCount || 0;
   const pct     = total > 0 ? Math.round((present / total) * 100) : 0;
 
-  document.getElementById('stat-total').textContent   = total   || '—';
-  document.getElementById('stat-present').textContent = present;
-  document.getElementById('stat-missing').textContent = missing;
-  document.getElementById('stat-percent').textContent = pct + '%';
-  document.getElementById('progress-fill').style.width = pct + '%';
+  const el = (id) => document.getElementById(id);
+  if (el('stat-total'))   el('stat-total').textContent   = total   || '—';
+  if (el('stat-present')) el('stat-present').textContent = present;
+  if (el('stat-missing')) el('stat-missing').textContent = missing;
+  // fallback for old cached HTML
+  if (el('stat-session')) el('stat-session').textContent = missing;
+  if (el('stat-percent')) el('stat-percent').textContent = pct + '%';
+  const fill = el('progress-fill');
+  if (fill) fill.style.width = pct + '%';
 }
 
 async function refreshData() {
@@ -734,21 +755,10 @@ function setFileStatus(status) {
   }
 }
 
-async function changeCensusRound() {
-  const select = document.getElementById('census-round-select');
-  if (select) {
-    state.selectedCensusRound = select.value;
-    showLoading('Switching round to ' + state.selectedCensusRound + '…');
-    try {
-      await loadStats();
-      hideLoading();
-      showToast('Switched to ' + state.selectedCensusRound, 'success', '📅');
-    } catch (e) {
-      hideLoading();
-      showToast('Error switching round', 'error', '✕');
-    }
-  }
-}
+
+// changeCensusRound is no longer needed — round is auto-set to current month.
+
+
 
 async function triggerAudit() {
   closeUserMenu();
