@@ -1,12 +1,12 @@
 /* ============================================================
-   PF CENSUS APP — Main Application Logic
+   PF CENSUS APP — Main Application Logic (Phase 4)
    ============================================================ */
 
 'use strict';
 
 // ── State ─────────────────────────────────────────────────────
 const state = {
-  scriptUrl:           '',
+  scriptUrl:           CONFIG.SCRIPT_URL,
   sheetName:           CONFIG.SHEET_NAME,
   columns:             { ...CONFIG.COLUMNS },
   headerRow:           CONFIG.HEADER_ROW,
@@ -15,15 +15,22 @@ const state = {
   totalFiles:          0,
   presentCount:        0,
   missingCount:        0,
+  unmarkedCount:       0,
   currentResult:       null,
   isListening:         false,
   recognition:         null,
   logExpanded:         false,
   selectedFileStatus:  'ACTIVE',
-  selectedCensusRound: getMonthLabel(), // Auto-set to current month
+  selectedCensusRound: getMonthLabel(),
+  currentUser:         null,
+  isAdmin:             false,         // true for MARGARET, SARAH, MACHARIA
+  reportData:          null,
+  compiledData:        null,
+  activeReportTab:     'summary',
+  movementHistoryLoaded:    false,
+  censusTimelineLoaded:     false,
 };
 
-// Returns current month label e.g. "July 2026"
 function getMonthLabel() {
   return new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
@@ -33,128 +40,248 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   initVoiceRecognition();
 
-  // Always update the month badge to current month
   state.selectedCensusRound = getMonthLabel();
   const badge = document.getElementById('month-badge');
   if (badge) badge.textContent = state.selectedCensusRound;
 
-  if (!state.scriptUrl) {
-    showSetupScreen();
+  // Permanent URL is always in CONFIG — skip setup screen
+  if (!state.currentUser) {
+    showLoginScreen();
   } else {
     showMainApp();
     loadStats();
+    checkMissingAlerts();
   }
 });
 
-// ── Settings (localStorage) ───────────────────────────────────
+// ── Settings ──────────────────────────────────────────────────
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem('pfcensus_settings') || '{}');
-    state.scriptUrl  = saved.scriptUrl  || CONFIG.SCRIPT_URL  || '';
-    state.sheetName  = saved.sheetName  || CONFIG.SHEET_NAME  || 'Sheet1';
+    state.scriptUrl  = CONFIG.SCRIPT_URL;
+    state.sheetName  = saved.sheetName  || CONFIG.SHEET_NAME  || 'Main DBase';
     state.headerRow  = saved.headerRow  || CONFIG.HEADER_ROW  || 1;
     state.columns    = { ...CONFIG.COLUMNS, ...(saved.columns || {}) };
+
+    const savedUser = JSON.parse(localStorage.getItem('pfcensus_user') || 'null');
+    state.currentUser = savedUser;
+    if (savedUser) {
+      state.isAdmin = savedUser.isAdmin ||
+        ['MARGARET','SARAH','MACHARIA'].includes((savedUser.name || '').toUpperCase());
+    }
   } catch (e) { /* use defaults */ }
 }
 
 function saveSettings() {
   const s = {
-    scriptUrl: document.getElementById('setup-url-input')?.value.trim() || state.scriptUrl,
     sheetName: document.getElementById('sheet-name-input')?.value.trim() || state.sheetName,
     headerRow: parseInt(document.getElementById('header-row-input')?.value) || state.headerRow,
     columns: {
-      PF_NUMBER:     (document.getElementById('col-pf')?.value    || state.columns.PF_NUMBER).toUpperCase(),
+      PF_NUMBER:     (document.getElementById('col-pf')?.value     || state.columns.PF_NUMBER).toUpperCase(),
       EMPLOYEE_NAME: (document.getElementById('col-name')?.value   || state.columns.EMPLOYEE_NAME).toUpperCase(),
-      DEPARTMENT:    (document.getElementById('col-dept')?.value   || state.columns.DEPARTMENT || '').toUpperCase() || null,
-      DESIGNATION:   (document.getElementById('col-desig')?.value  || state.columns.DESIGNATION || '').toUpperCase() || null,
+      DEPARTMENT:    (document.getElementById('col-dept')?.value   || '').toUpperCase() || null,
+      DESIGNATION:   (document.getElementById('col-desig')?.value  || '').toUpperCase() || null,
       DATE_TIME:     (document.getElementById('col-datetime')?.value || state.columns.DATE_TIME).toUpperCase(),
       STATUS:        (document.getElementById('col-status')?.value  || state.columns.STATUS).toUpperCase(),
     },
   };
   localStorage.setItem('pfcensus_settings', JSON.stringify(s));
-  state.scriptUrl = s.scriptUrl;
   state.sheetName = s.sheetName;
   state.headerRow = s.headerRow;
   state.columns   = s.columns;
   closeSettings();
   showToast('Settings saved', 'success', '✓');
-  if (state.scriptUrl) {
-    showMainApp();
-    loadStats();
-  }
 }
 
 function clearAllSettings() {
   localStorage.removeItem('pfcensus_settings');
+  localStorage.removeItem('pfcensus_user');
   location.reload();
 }
 
-// ── Setup Screen ──────────────────────────────────────────────
-function showSetupScreen() {
+// ── Login / Register Screens ───────────────────────────────────
+function showLoginScreen() {
   document.getElementById('auth-overlay').classList.add('active');
   document.getElementById('main-app').classList.add('hidden');
-  renderSetupOverlay();
+  renderLoginOverlay();
 }
 
-function renderSetupOverlay() {
+function renderLoginOverlay() {
   const overlay = document.getElementById('auth-overlay');
   overlay.innerHTML = `
     <div class="overlay-content">
       <div class="app-logo">
         <span class="logo-icon">📁</span>
         <h1 class="logo-title">PF Census</h1>
-        <p class="logo-subtitle">Physical File Tracker</p>
+        <p class="logo-subtitle">Physical File Tracker — ${getMonthLabel()}</p>
       </div>
 
       <div class="setup-form">
-        <label for="setup-url-input">Apps Script URL</label>
-        <textarea
-          id="setup-url-input"
-          class="setup-url-input"
-          rows="3"
-          placeholder="https://script.google.com/macros/s/AKfycb…/exec"
-          spellcheck="false"
-        ></textarea>
-        <p class="setup-url-hint">
-          Don't have this URL yet?
-          <a href="SETUP.md" target="_blank">Follow the 5-minute setup guide →</a>
+        <div class="input-group">
+          <label for="login-name">First Name</label>
+          <input type="text" id="login-name" class="form-input" placeholder="e.g. MACHARIA" autocomplete="given-name" />
+        </div>
+        <div class="input-group" style="margin-top: 12px;">
+          <label for="login-pf">Your PF Number</label>
+          <input type="text" id="login-pf" class="form-input" placeholder="e.g. 4420" inputmode="numeric" />
+        </div>
+        <div class="input-group" style="margin-top: 12px;">
+          <label for="login-id">ID Number</label>
+          <input type="password" id="login-id" class="form-input" placeholder="Enter National ID Number" />
+        </div>
+        <p class="setup-url-hint" style="margin-top:16px;">
+          First time using the app?
+          <a href="#" onclick="showRegisterScreen(); return false;">Register here →</a>
         </p>
       </div>
 
-      <button class="btn-primary" onclick="connectScript()">
-        Connect to Google Sheet
+      <button class="btn-primary" onclick="handleLogin()">
+        Log In
       </button>
-      <p class="auth-note">Your sheet data is accessed securely via Google Apps Script</p>
+      <p class="auth-note">Your data is secured by Google Apps Script authentication</p>
     </div>
   `;
 }
 
-async function connectScript() {
-  const url = document.getElementById('setup-url-input')?.value.trim();
-  if (!url || !url.includes('script.google.com')) {
-    showToast('Please enter a valid Apps Script URL', 'error', '⚠️');
+function showRegisterScreen() {
+  document.getElementById('auth-overlay').classList.add('active');
+  document.getElementById('main-app').classList.add('hidden');
+  renderRegisterOverlay();
+}
+
+function renderRegisterOverlay() {
+  const overlay = document.getElementById('auth-overlay');
+  overlay.innerHTML = `
+    <div class="overlay-content" style="max-height: 90vh; overflow-y: auto; padding-bottom: 24px;">
+      <div class="app-logo">
+        <span class="logo-icon">📝</span>
+        <h1 class="logo-title">Register</h1>
+        <p class="logo-subtitle">Create your census account</p>
+      </div>
+
+      <div class="setup-form">
+        <div class="input-group">
+          <label for="reg-name">First Name</label>
+          <input type="text" id="reg-name" class="form-input" placeholder="e.g. MACHARIA" />
+        </div>
+        <div class="input-group" style="margin-top: 8px;">
+          <label for="reg-pf">Your Personal PF Number</label>
+          <input type="text" id="reg-pf" class="form-input" placeholder="Your own PF (used for login)" inputmode="numeric" />
+        </div>
+        <div class="input-group" style="margin-top: 8px;">
+          <label for="reg-id">National ID Number</label>
+          <input type="text" id="reg-id" class="form-input" placeholder="Your ID card number" />
+        </div>
+        <div class="input-group" style="margin-top: 8px;">
+          <label for="reg-mobile">Mobile Number</label>
+          <input type="text" id="reg-mobile" class="form-input" placeholder="e.g. 0724333780" inputmode="numeric" />
+        </div>
+        <div class="input-group" style="margin-top: 8px;">
+          <label for="reg-batches">Assigned Batch Ranges</label>
+          <input type="text" id="reg-batches" class="form-input" placeholder="e.g. 3001-3500, 4000-4560" />
+          <p class="field-hint">Comma-separated ranges. Batches cannot overlap with other users.</p>
+        </div>
+        <p class="setup-url-hint" style="margin-top:16px;">
+          Already registered?
+          <a href="#" onclick="showLoginScreen(); return false;">Log in here →</a>
+        </p>
+      </div>
+
+      <button class="btn-primary" onclick="handleRegister()">
+        Register &amp; Create Tab
+      </button>
+    </div>
+  `;
+}
+
+async function handleLogin() {
+  const firstName = (document.getElementById('login-name')?.value.trim() || '').toUpperCase();
+  const pfNumber  = (document.getElementById('login-pf')?.value.trim()   || '');
+  const idNumber  = (document.getElementById('login-id')?.value.trim()   || '');
+
+  if (!firstName || !pfNumber || !idNumber) {
+    showToast('Name, PF Number, and ID required', 'warning', '⚠️');
     return;
   }
 
-  showLoading('Connecting to your sheet…');
-  const originalUrl = state.scriptUrl;
-  state.scriptUrl = url; // Temporarily set to allow apiFetch to use it
-
+  showLoading('Verifying credentials…');
   try {
-    const res = await apiFetch('ping');
-    // If it succeeded without throwing, we're good
-    localStorage.setItem('pfcensus_settings', JSON.stringify({
-      ...JSON.parse(localStorage.getItem('pfcensus_settings') || '{}'),
-      scriptUrl: url
-    }));
+    const data = await apiPost('login', { firstName, pf: pfNumber, idNo: idNumber });
+
+    const user = {
+      name:    firstName,
+      batches: data.batches || [],
+      round:   data.round || getMonthLabel(),
+    };
+    state.currentUser = user;
+    state.isAdmin = ['MARGARET','SARAH','MACHARIA'].includes(firstName.toUpperCase());
+    state.totalFiles   = data.total   || 0;
+    state.presentCount = data.present || 0;
+    state.missingCount = data.missing || 0;
+    state.unmarkedCount= data.unmarked|| 0;
+
+    localStorage.setItem('pfcensus_user', JSON.stringify({ ...user, isAdmin: state.isAdmin }));
     hideLoading();
     showMainApp();
-    loadStats();
-    showToast('Connected successfully!', 'success', '✓');
+    updateStatsUI();
+    checkMissingAlerts();
+    const greeting = state.isAdmin ? '👑 Welcome, Admin ' + firstName + '!' : 'Welcome, ' + firstName + '!';
+    showToast(greeting, 'success', '🎉');
   } catch (e) {
-    state.scriptUrl = originalUrl; // Restore original on failure
     hideLoading();
-    showToast('Could not connect: ' + e.message, 'error', '✕');
+    showToast('Login failed: ' + e.message, 'error', '✕');
+  }
+}
+
+async function handleRegister() {
+  const firstName = (document.getElementById('reg-name')?.value.trim()    || '').toUpperCase();
+  const pfNumber  = (document.getElementById('reg-pf')?.value.trim()      || '');
+  const idNumber  = (document.getElementById('reg-id')?.value.trim()      || '');
+  const mobile    = (document.getElementById('reg-mobile')?.value.trim()  || '');
+  const batchStr  = (document.getElementById('reg-batches')?.value.trim() || '');
+
+  if (!firstName || !pfNumber || !idNumber || !mobile || !batchStr) {
+    showToast('All fields are required', 'warning', '⚠️');
+    return;
+  }
+
+  // Parse batch ranges: "3001-3500, 4000-4560" → [{from:'3001', to:'3500'}, ...]
+  const batches = batchStr.split(',').map(part => {
+    const m = part.trim().match(/(\d+)\s*[-–]\s*(\d+)/);
+    if (!m) throw new Error('Invalid batch range: "' + part.trim() + '". Use format: 3001-3500');
+    return { from: m[1], to: m[2] };
+  });
+
+  // Check for overlapping ranges in the list itself
+  for (let i = 0; i < batches.length; i++) {
+    for (let j = i + 1; j < batches.length; j++) {
+      const a = batches[i], b = batches[j];
+      if (parseInt(a.from) <= parseInt(b.to) && parseInt(b.from) <= parseInt(a.to)) {
+        showToast('Batch ranges overlap each other: ' + a.from + '-' + a.to + ' and ' + b.from + '-' + b.to, 'error', '✕');
+        return;
+      }
+    }
+  }
+
+  showLoading('Registering and creating your sheet tab…');
+  try {
+    const data = await apiPost('register', { firstName, pf: pfNumber, idNo: idNumber, mobile, batches });
+    hideLoading();
+    showToast('Registered successfully! Please log in.', 'success', '✓');
+    showLoginScreen();
+  } catch (e) {
+    hideLoading();
+    showToast('Registration failed: ' + e.message, 'error', '✕');
+  }
+}
+
+function handleLogout() {
+  closeUserMenu();
+  if (confirm('Logout ' + (state.currentUser ? state.currentUser.name : '') + '?')) {
+    localStorage.removeItem('pfcensus_user');
+    state.currentUser = null;
+    state.reportData  = null;
+    showLoginScreen();
   }
 }
 
@@ -162,55 +289,76 @@ async function connectScript() {
 function showMainApp() {
   document.getElementById('auth-overlay').classList.remove('active');
   document.getElementById('main-app').classList.remove('hidden');
-  document.getElementById('sheet-info').textContent =
-    state.sheetName + ' · ' + CONFIG.SPREADSHEET_ID.slice(0, 10) + '…';
-  document.getElementById('user-initial').textContent = '👤';
 
-  // Always ensure current month is set
+  if (state.currentUser) {
+    const batchLabel = Array.isArray(state.currentUser.batches)
+      ? state.currentUser.batches.map(b => 'PF ' + b.from + '–' + b.to).join(', ')
+      : (state.currentUser.batches || '—');
+
+    const nameLabel = state.isAdmin
+      ? '👑 ' + state.currentUser.name + ' (Admin)'
+      : state.currentUser.name;
+
+    document.getElementById('header-user-name').textContent    = nameLabel;
+    document.getElementById('header-user-batches').textContent = state.isAdmin
+      ? 'Super Admin — All Sheets'
+      : 'Batches: ' + batchLabel;
+    document.getElementById('sheet-info').textContent  = 'Tab: ' + state.currentUser.name;
+    document.getElementById('user-initial').textContent = state.isAdmin ? '👑' : state.currentUser.name[0].toUpperCase();
+  } else {
+    document.getElementById('header-user-name').textContent    = 'PF Census';
+    document.getElementById('header-user-batches').textContent = 'Batches: —';
+    document.getElementById('sheet-info').textContent          = 'Connecting…';
+    document.getElementById('user-initial').textContent        = '👤';
+  }
+
   state.selectedCensusRound = getMonthLabel();
   const badge = document.getElementById('month-badge');
   if (badge) badge.textContent = state.selectedCensusRound;
+
+  // Show/hide admin tab
+  const adminTab = document.getElementById('tab-compiled');
+  if (adminTab) adminTab.classList.toggle('hidden', !state.isAdmin);
 }
 
-
-// ── API Fetch Helper ──────────────────────────────────────────
+// ── API Helpers ───────────────────────────────────────────────
 async function apiFetch(action, params = {}) {
-  if (!state.scriptUrl) throw new Error('No script URL configured');
-
   const url = new URL(state.scriptUrl);
   url.searchParams.set('action', action);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  if (state.currentUser) url.searchParams.set('username', state.currentUser.name);
+  url.searchParams.set('round', state.selectedCensusRound);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
 
-  const resp = await fetch(url.toString(), {
-    method: 'GET',
-    redirect: 'follow',
-  });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const resp = await fetch(url.toString(), { method: 'GET', redirect: 'follow' });
+  if (!resp.ok) throw new Error('Server error HTTP ' + resp.status);
   const json = await resp.json();
-  if (!json.ok) throw new Error(json.error || 'Unknown error');
-  return json.data;
+  if (json.success === false) throw new Error(json.error || 'Unknown server error');
+  return json;          // backend returns { success:true, ...data }
 }
 
 async function apiPost(action, body = {}) {
-  if (!state.scriptUrl) throw new Error('No script URL configured');
+  const payload = { action, ...body };
+  if (state.currentUser && !payload.username) payload.username = state.currentUser.name;
+
   const resp = await fetch(state.scriptUrl, {
     method: 'POST',
     redirect: 'follow',
-    body: JSON.stringify({ action, ...body }),
+    body: JSON.stringify(payload),
   });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  if (!resp.ok) throw new Error('Server error HTTP ' + resp.status);
   const json = await resp.json();
-  if (!json.ok) throw new Error(json.error || 'Unknown error');
-  return json.data;
+  if (json.success === false) throw new Error(json.error || 'Unknown server error');
+  return json;
 }
 
 // ── Load Stats ────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const data = await apiFetch('stats', { round: state.selectedCensusRound });
-    state.totalFiles   = data.total;
-    state.presentCount = data.present;
-    state.missingCount = data.missing || 0;
+    const data = await apiFetch('getstats');
+    state.totalFiles    = data.total    || 0;
+    state.presentCount  = data.present  || 0;
+    state.missingCount  = data.missing  || 0;
+    state.unmarkedCount = data.unmarked || 0;
     updateStatsUI();
   } catch (e) {
     console.error('Stats error:', e);
@@ -218,18 +366,15 @@ async function loadStats() {
 }
 
 function updateStatsUI() {
-  const total   = state.totalFiles;
-  const present = state.presentCount;
-  const missing = state.missingCount || 0;
-  const pct     = total > 0 ? Math.round((present / total) * 100) : 0;
-
   const el = (id) => document.getElementById(id);
-  if (el('stat-total'))   el('stat-total').textContent   = total   || '—';
-  if (el('stat-present')) el('stat-present').textContent = present;
-  if (el('stat-missing')) el('stat-missing').textContent = missing;
-  // fallback for old cached HTML
-  if (el('stat-session')) el('stat-session').textContent = missing;
-  if (el('stat-percent')) el('stat-percent').textContent = pct + '%';
+  const pct = state.totalFiles > 0
+    ? Math.round((state.presentCount / state.totalFiles) * 100) : 0;
+
+  if (el('stat-total'))    el('stat-total').textContent   = state.totalFiles   || '—';
+  if (el('stat-present'))  el('stat-present').textContent = state.presentCount;
+  if (el('stat-missing'))  el('stat-missing').textContent = state.missingCount;
+  if (el('stat-unmarked')) el('stat-unmarked').textContent= state.unmarkedCount;
+  if (el('stat-percent'))  el('stat-percent').textContent = pct + '%';
   const fill = el('progress-fill');
   if (fill) fill.style.width = pct + '%';
 }
@@ -239,11 +384,33 @@ async function refreshData() {
   showLoading('Refreshing data…');
   try {
     await loadStats();
+    await checkMissingAlerts();
     hideLoading();
     showToast('Data refreshed', 'success', '🔄');
   } catch (e) {
     hideLoading();
     showToast('Refresh failed', 'error', '✕');
+  }
+}
+
+// ── Missing Alerts Check ──────────────────────────────────────
+async function checkMissingAlerts() {
+  if (!state.currentUser) return;
+  try {
+    const data = await apiFetch('missingalerts');
+    const alerts = data.alerts || [];
+    const badge  = document.getElementById('missing-alert-badge');
+    const cnt    = document.getElementById('missing-alert-count');
+    if (badge) {
+      if (alerts.length > 0) {
+        badge.classList.remove('hidden');
+        if (cnt) cnt.textContent = alerts.length;
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+  } catch (e) {
+    console.warn('Missing alerts check failed:', e.message);
   }
 }
 
@@ -264,15 +431,29 @@ async function doSearch(pfRaw) {
     return;
   }
 
+  // Client-side batch check
+  if (state.currentUser && Array.isArray(state.currentUser.batches)) {
+    const pfVal = parseInt(pf);
+    const inRange = state.currentUser.batches.some(b =>
+      pfVal >= parseInt(b.from) && pfVal <= parseInt(b.to)
+    );
+    if (!inRange) {
+      const batchLabel = state.currentUser.batches.map(b => 'PF ' + b.from + '–' + b.to).join(', ');
+      showToast('PF ' + pf + ' is outside your batches: ' + batchLabel, 'error', '✕');
+      return;
+    }
+  }
+
   showLoading('Searching for PF ' + pf + '…');
   hideResultCard();
 
   try {
-    const data = await apiFetch('search', { pf });
+    const data = await apiFetch('lookup', { pf });
     hideLoading();
 
     if (data.found) {
       state.currentResult = data;
+      state.movementHistoryLoaded = false;
       showFoundResult(data);
     } else {
       showNotFoundResult(pf);
@@ -284,10 +465,8 @@ async function doSearch(pfRaw) {
 }
 
 function normalizePF(raw) {
-  // Remove any non-alphanumeric prefix/suffix
   const cleaned = String(raw).trim().replace(/[^a-zA-Z0-9]/g, '');
   if (!cleaned) return null;
-  // If purely numeric, pad to 4 digits
   if (/^\d+$/.test(cleaned)) return cleaned.padStart(CONFIG.PF_DIGITS || 4, '0');
   return cleaned.toUpperCase();
 }
@@ -296,65 +475,96 @@ function normalizePF(raw) {
 function showFoundResult(data) {
   const card = document.getElementById('result-card');
   card.classList.remove('hidden');
-
   document.getElementById('result-not-found').classList.add('hidden');
   document.getElementById('result-success').classList.add('hidden');
-  const found = document.getElementById('result-found');
-  found.classList.remove('hidden');
+  document.getElementById('result-found').classList.remove('hidden');
 
-  // Avatar letter
+  // Avatar
   const nameStr = data.name || data.pf || '?';
   document.getElementById('emp-avatar-letter').textContent = nameStr[0].toUpperCase();
 
-  // Employee info
+  // Basic info
   document.getElementById('emp-name').textContent = data.name || '(No name)';
   document.getElementById('emp-pf').textContent   = 'PF: ' + data.pf;
 
   // Status badge
   const badge = document.getElementById('current-status-badge');
-  if (data.isPresent) {
+  if (data.flag === 'PRESENT') {
     badge.textContent = '✓ PRESENT';
     badge.className   = 'result-badge badge-present';
+  } else if (data.flag === 'MISSING') {
+    badge.textContent = '⚠ MISSING';
+    badge.className   = 'result-badge badge-missing';
+  } else if (data.flag === 'LOCATED') {
+    badge.textContent = '📍 LOCATED';
+    badge.className   = 'result-badge badge-located';
   } else {
-    badge.textContent = 'ABSENT';
+    badge.textContent = 'NOT MARKED';
     badge.className   = 'result-badge badge-absent';
   }
 
+  // Missing alert banner
+  const warnBanner = document.getElementById('missing-warn-banner');
+  if (warnBanner) {
+    if (data.flag === 'MISSING' && (data.missingCount || 0) >= 2) {
+      warnBanner.classList.remove('hidden');
+      const cnt = document.getElementById('missing-warn-count');
+      if (cnt) cnt.textContent = data.missingCount;
+    } else {
+      warnBanner.classList.add('hidden');
+    }
+  }
+
   // Detail rows
-  const statusRow = document.getElementById('status-row');
-  if (data.hrStatus) {
-    statusRow.classList.remove('hidden');
-    document.getElementById('emp-hr-status').textContent = data.hrStatus;
+  setDetailRow('status-row',      'emp-hr-status',    data.hrStatus);
+  setDetailRow('phone-row',       'emp-phone',         data.phone);
+  setDetailRow('last-marked-row', 'emp-last-marked',  data.lastMarked || data.lastDateTime);
+
+  // Current custody location display
+  const custodyDisplayRow = document.getElementById('custody-display-row');
+  const custodyDisplayVal = document.getElementById('emp-current-custody');
+  if (data.custody) {
+    if (custodyDisplayRow) custodyDisplayRow.style.display = '';
+    if (custodyDisplayVal) custodyDisplayVal.textContent = data.custody;
   } else {
-    statusRow.classList.add('hidden');
+    if (custodyDisplayRow) custodyDisplayRow.style.display = 'none';
   }
 
-  const phoneRow = document.getElementById('phone-row');
-  if (data.phone) {
-    phoneRow.classList.remove('hidden');
-    document.getElementById('emp-phone').textContent = data.phone;
-  } else {
-    phoneRow.classList.add('hidden');
-  }
-
-  const lastRow = document.getElementById('last-marked-row');
-  if (data.lastDateTime) {
-    lastRow.classList.remove('hidden');
-    document.getElementById('emp-last-marked').textContent = data.lastDateTime;
-  } else {
-    lastRow.classList.add('hidden');
-  }
-
-  // Pre-fill Custody and Status from database
+  // Pre-fill form fields
   setFileStatus(data.fileStatus || 'ACTIVE');
   const custodySelect = document.getElementById('custody-select');
   if (custodySelect) {
-    custodySelect.value = data.custody || 'REGISTRY';
+    const loc = (data.custody || 'REGISTRY').toUpperCase();
+    const found = [...custodySelect.options].some(o => o.value === loc);
+    custodySelect.value = found ? loc : 'REGISTRY';
   }
 
-  // Mark button
+  // Show "Update Location Only" for located/missing files
+  const updateLocRow = document.getElementById('update-location-row');
+  const moveHistoryToggle = document.getElementById('movement-history-toggle');
+  if (updateLocRow) updateLocRow.style.display = (data.flag === 'MISSING' || data.flag === 'LOCATED') ? '' : 'none';
+  if (moveHistoryToggle) moveHistoryToggle.style.display = '';
+
+  // Reset movement history
+  const moveBody = document.getElementById('movement-history-body');
+  if (moveBody) moveBody.classList.add('hidden');
+  const moveIcon = document.getElementById('movement-toggle-icon');
+  if (moveIcon) moveIcon.textContent = '▼';
+
+  // Always show census timeline toggle and reset it
+  const ctToggle = document.getElementById('census-timeline-toggle');
+  const ctBody   = document.getElementById('census-timeline-body');
+  const ctIcon   = document.getElementById('census-timeline-icon');
+  if (ctToggle) ctToggle.style.display = '';
+  if (ctBody)   ctBody.classList.add('hidden');
+  if (ctIcon)   ctIcon.textContent = '▼';
+  state.censusTimelineLoaded = false;
+
+
+
+  // Mark button label
   const markBtn = document.getElementById('mark-btn');
-  if (data.isPresent) {
+  if (data.flag === 'PRESENT' && data.round === state.selectedCensusRound) {
     markBtn.innerHTML = '<span class="mark-icon">✓</span> Already PRESENT — Re-mark?';
     markBtn.className = 'btn-mark-present already-present';
   } else {
@@ -362,40 +572,36 @@ function showFoundResult(data) {
     markBtn.className = 'btn-mark-present';
   }
 
-  // Scroll into view
   setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+}
+
+function setDetailRow(rowId, valueId, value) {
+  const row = document.getElementById(rowId);
+  const val = document.getElementById(valueId);
+  if (!row || !val) return;
+  if (value) {
+    row.classList.remove('hidden');
+    row.style.display = '';
+    val.textContent = value;
+  } else {
+    row.style.display = 'none';
+  }
 }
 
 function showNotFoundResult(pf) {
   const card = document.getElementById('result-card');
   card.classList.remove('hidden');
-
   document.getElementById('result-found').classList.add('hidden');
   document.getElementById('result-success').classList.add('hidden');
-  const notFound = document.getElementById('result-not-found');
-  notFound.classList.remove('hidden');
-
-  document.getElementById('not-found-msg').textContent =
-    'PF ' + pf + ' was not found in the sheet.';
-
+  document.getElementById('result-not-found').classList.remove('hidden');
+  document.getElementById('not-found-msg').textContent = 'PF ' + pf + ' was not found in your sheet.';
   setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
 }
 
-function hideResultCard() {
-  document.getElementById('result-card').classList.add('hidden');
-}
-
-function clearResult() {
-  hideResultCard();
-  state.currentResult = null;
-}
-
-function clearInput() {
-  document.getElementById('pf-input').value = '';
-  clearResult();
-}
-
-function clearForNext() {
+function hideResultCard() { document.getElementById('result-card').classList.add('hidden'); }
+function clearResult()    { hideResultCard(); state.currentResult = null; }
+function clearInput()     { document.getElementById('pf-input').value = ''; clearResult(); }
+function clearForNext()   {
   clearInput();
   hideResultCard();
   document.getElementById('pf-input').focus();
@@ -405,9 +611,7 @@ function clearForNext() {
 // ── Mark Present ──────────────────────────────────────────────
 async function markPresent() {
   if (!state.currentResult) return;
-  const pf = state.currentResult.pf;
-
-  // Retrieve selected options from form
+  const pf         = state.currentResult.pf;
   const fileStatus = state.selectedFileStatus;
   const custody    = document.getElementById('custody-select')?.value || 'REGISTRY';
   const round      = state.selectedCensusRound;
@@ -415,37 +619,17 @@ async function markPresent() {
   showLoading('Marking PF ' + pf + ' as PRESENT…');
 
   try {
-    const data = await apiPost('mark', {
-      pf,
-      fileStatus,
-      custody,
-      round,
-      markedBy: 'Census App'
-    });
+    const data = await apiPost('markpresent', { pf, fileStatus, custody, round });
     hideLoading();
 
-    if (data.success) {
-      // Update stats
-      if (!state.currentResult.isPresent) {
-        state.presentCount++;
-        state.sessionCount++;
-      }
-      state.sessionCount = state.sessionCount || 1;
-      updateStatsUI();
+    // Update local state
+    if (state.currentResult.flag !== 'PRESENT') state.presentCount++;
+    if (state.currentResult.flag === 'MISSING')  state.missingCount = Math.max(0, state.missingCount - 1);
+    state.sessionCount++;
+    updateStatsUI();
 
-      // Add to session log
-      addToLog({
-        pf:        data.pf,
-        name:      data.name,
-        timestamp: data.timestamp,
-        custody:   data.custody,
-      });
-
-      // Show success state
-      showSuccessResult(data);
-    } else {
-      throw new Error(data.error || 'Mark failed');
-    }
+    addToLog({ pf: data.pf, name: data.name, timestamp: data.timestamp, custody: data.custody });
+    showSuccessResult(data);
   } catch (e) {
     hideLoading();
     showToast('Error: ' + e.message, 'error', '✕');
@@ -457,19 +641,263 @@ function showSuccessResult(data) {
   document.getElementById('result-not-found').classList.add('hidden');
   const success = document.getElementById('result-success');
   success.classList.remove('hidden');
-
-  const icon = document.querySelector('.result-icon-success');
+  const icon = success.querySelector('.result-icon-success');
   if (icon) icon.classList.add('success-pulse');
 
-  document.getElementById('success-msg').textContent =
-    (data.name || data.pf) + ' marked as PRESENT';
-  document.getElementById('success-time').textContent = '🕐 ' + data.timestamp;
+  const msg = document.getElementById('success-msg');
+  const time = document.getElementById('success-time');
+  if (msg)  msg.textContent  = (data.name || data.pf) + ' marked as PRESENT at ' + (data.custody || '');
+  if (time) time.textContent = '🕐 ' + (data.timestamp || '');
+}
+
+// ── Update File Location ──────────────────────────────────────
+async function updateFileLocation() {
+  if (!state.currentResult) return;
+  const pf          = state.currentResult.pf;
+  const newLocation = document.getElementById('custody-select')?.value || 'REGISTRY';
+
+  showLoading('Updating location for PF ' + pf + '…');
+  try {
+    const data = await apiPost('updatelocation', { pf, newLocation });
+    hideLoading();
+
+    // Update local result
+    state.currentResult.custody = newLocation;
+    if (state.currentResult.flag === 'MISSING') {
+      state.currentResult.flag = 'LOCATED';
+      state.missingCount = Math.max(0, state.missingCount - 1);
+      updateStatsUI();
+    }
+
+    const custDisplay = document.getElementById('emp-current-custody');
+    if (custDisplay) custDisplay.textContent = newLocation;
+
+    showToast('Location updated: ' + data.oldLocation + ' → ' + newLocation, 'success', '📍');
+
+    // Reload movement history (invalidate cache)
+    state.movementHistoryLoaded = false;
+    const moveBody = document.getElementById('movement-history-body');
+    if (moveBody && !moveBody.classList.contains('hidden')) {
+      loadMovementHistory(pf);
+    }
+  } catch (e) {
+    hideLoading();
+    showToast('Update failed: ' + e.message, 'error', '✕');
+  }
+}
+
+// ── Movement History ─────────────────────────────────────────
+function toggleMovementHistory() {
+  const body = document.getElementById('movement-history-body');
+  const icon = document.getElementById('movement-toggle-icon');
+  if (!body) return;
+
+  const isHidden = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !isHidden);
+  if (icon) icon.textContent = isHidden ? '▲' : '▼';
+
+  if (isHidden && !state.movementHistoryLoaded && state.currentResult) {
+    loadMovementHistory(state.currentResult.pf);
+  }
+}
+
+async function loadMovementHistory(pf) {
+  const list    = document.getElementById('movement-list');
+  const loading = document.getElementById('movement-loading');
+  if (!list) return;
+
+  if (loading) loading.style.display = '';
+  list.innerHTML = '';
+
+  try {
+    const data = await apiFetch('movementlog', { pf });
+    if (loading) loading.style.display = 'none';
+    const history = data.history || [];
+    state.movementHistoryLoaded = true;
+
+    if (!history.length) {
+      list.innerHTML = '<li class="move-empty">No location changes recorded yet.</li>';
+      return;
+    }
+    history.forEach(h => {
+      const li = document.createElement('li');
+      li.className = 'move-item';
+      li.innerHTML = `
+        <span class="move-time">${escHtml(h.timestamp)}</span>
+        <span class="move-arrow">${escHtml(h.from)} → ${escHtml(h.to)}</span>
+        <span class="move-by">by ${escHtml(h.updatedBy)}</span>
+      `;
+      list.appendChild(li);
+    });
+  } catch (e) {
+    if (loading) loading.style.display = 'none';
+    list.innerHTML = '<li class="move-empty">Could not load history.</li>';
+  }
+}
+
+// ── Report Screen ─────────────────────────────────────────────
+async function openReportScreen(tab = 'summary') {
+  closeUserMenu();
+  const overlay = document.getElementById('report-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+
+  state.activeReportTab = tab;
+  switchReportTab(tab);
+
+  // Always refresh report data when opening
+  await loadReport();
+}
+
+function closeReportScreen() {
+  const overlay = document.getElementById('report-overlay');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+function switchReportTab(tab) {
+  state.activeReportTab = tab;
+  ['summary','missing','unmarked','marked','compiled'].forEach(t => {
+    const btn     = document.getElementById('tab-' + t);
+    const content = document.getElementById('tab-content-' + t);
+    if (btn)     btn.classList.toggle('active', t === tab);
+    if (content) content.classList.toggle('hidden', t !== tab);
+  });
+  // Lazy-load compiled report when admin switches to that tab
+  if (tab === 'compiled' && state.isAdmin && !state.compiledData) {
+    loadCompiledReport();
+  }
+}
+
+async function loadReport() {
+  const loading = document.getElementById('report-loading');
+  if (loading) loading.style.display = '';
+
+  try {
+    const data = await apiFetch('report');
+    state.reportData = data;
+    if (loading) loading.style.display = 'none';
+    renderReportData(data);
+  } catch (e) {
+    if (loading) loading.style.display = 'none';
+    showToast('Report failed: ' + e.message, 'error', '✕');
+  }
+}
+
+function renderReportData(data) {
+  if (!data) return;
+
+  const u = state.currentUser;
+  const nameStr = u ? u.name : 'Your';
+
+  // Header
+  const titleEl    = document.getElementById('report-title');
+  const subtitleEl = document.getElementById('report-subtitle');
+  const monthEl    = document.getElementById('report-month-label');
+  if (titleEl)    titleEl.textContent    = '📊 ' + nameStr + ' — Weeding Report';
+  if (subtitleEl) subtitleEl.textContent = 'Census Round: ' + (data.round || state.selectedCensusRound);
+  if (monthEl)    monthEl.textContent    = data.round || state.selectedCensusRound;
+
+  // Summary stats
+  setEl('rsc-total',   data.total   || 0);
+  setEl('rsc-marked',  data.marked  || 0);
+  setEl('rsc-unmarked',data.unmarked|| 0);
+  setEl('rsc-missing', data.missing || 0);
+
+  const pct = data.total > 0 ? Math.round((data.marked / data.total) * 100) : 0;
+  setEl('rsc-percent', pct + '%');
+  const fill = document.getElementById('rsc-progress-fill');
+  if (fill) fill.style.width = pct + '%';
+
+  // Missing tab
+  const missingNote = document.getElementById('missing-note');
+  if (missingNote) {
+    const cnt2plus = (data.missingList || []).filter(f => f.missingCount >= 2).length;
+    missingNote.textContent = (data.missing || 0) + ' file(s) flagged as MISSING — '
+      + cnt2plus + ' flagged in 2+ census rounds (critical).';
+  }
+  renderFileList('missing-file-list', 'missing-empty', data.missingList || [], 'missing');
+
+  // Unmarked tab
+  const unmarkedNote = document.getElementById('unmarked-note');
+  if (unmarkedNote) {
+    unmarkedNote.textContent = (data.unmarked || 0) + ' file(s) not yet marked this month.';
+  }
+  renderFileList('unmarked-file-list', 'unmarked-empty', data.unmarkedList || [], 'unmarked');
+
+  // Marked tab
+  const markedNote = document.getElementById('marked-note');
+  if (markedNote) {
+    markedNote.textContent = (data.marked || 0) + ' file(s) marked as PRESENT this round.';
+  }
+  renderFileList('marked-file-list', 'marked-empty', data.markedList || [], 'marked');
+}
+
+function renderFileList(listId, emptyId, items, type) {
+  const list  = document.getElementById(listId);
+  const empty = document.getElementById(emptyId);
+  if (!list) return;
+
+  list.innerHTML = '';
+
+  if (!items.length) {
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+
+  items.forEach(item => {
+    const li = document.createElement('li');
+    li.className = 'report-file-item rfi-' + type;
+
+    if (type === 'missing') {
+      const isCritical = (item.missingCount || 0) >= 2;
+      li.innerHTML = `
+        <div class="rfi-main">
+          <span class="rfi-pf">PF ${escHtml(item.pf)}</span>
+          <span class="rfi-name">${escHtml(item.name || '—')}</span>
+          ${isCritical ? '<span class="rfi-critical">🚨 CRITICAL</span>' : ''}
+        </div>
+        <div class="rfi-meta">
+          <span>Missing: ${escHtml(String(item.missingCount || 0))} round(s)</span>
+          ${item.custody ? '<span>Last: ' + escHtml(item.custody) + '</span>' : ''}
+          ${item.lastSeen ? '<span>' + escHtml(item.lastSeen) + '</span>' : ''}
+        </div>
+      `;
+    } else if (type === 'unmarked') {
+      li.innerHTML = `
+        <div class="rfi-main">
+          <span class="rfi-pf">PF ${escHtml(item.pf)}</span>
+          <span class="rfi-name">${escHtml(item.name || '—')}</span>
+        </div>
+        <div class="rfi-meta">
+          <span>Status: ${escHtml(item.hrStatus || 'Active')}</span>
+        </div>
+      `;
+    } else {   // marked
+      li.innerHTML = `
+        <div class="rfi-main">
+          <span class="rfi-pf">PF ${escHtml(item.pf)}</span>
+          <span class="rfi-name">${escHtml(item.name || '—')}</span>
+        </div>
+        <div class="rfi-meta">
+          <span>${escHtml(item.custody || 'REGISTRY')}</span>
+          <span>${escHtml(item.fileStatus || '')}</span>
+          <span>${escHtml(item.timestamp || '')}</span>
+        </div>
+      `;
+    }
+
+    list.appendChild(li);
+  });
+}
+
+function setEl(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
 }
 
 // ── Session Log ───────────────────────────────────────────────
 function addToLog(entry) {
   state.sessionLog.unshift(entry);
-
   const count = document.getElementById('log-count');
   if (count) count.textContent = state.sessionLog.length + ' marked';
 
@@ -491,68 +919,83 @@ function addToLog(entry) {
 
 function toggleLog() {
   state.logExpanded = !state.logExpanded;
-  const body = document.getElementById('log-body');
+  document.getElementById('log-body')?.classList.toggle('expanded', state.logExpanded);
   const icon = document.getElementById('log-toggle-icon');
-  body.classList.toggle('expanded', state.logExpanded);
-  icon.classList.toggle('open', state.logExpanded);
+  if (icon) icon.classList.toggle('open', state.logExpanded);
+}
+
+// ── Audit ─────────────────────────────────────────────────────
+async function triggerAudit() {
+  closeUserMenu();
+  const round = state.selectedCensusRound;
+  if (!confirm(
+    'Run Audit for ' + round + '?\n\n' +
+    'All ACTIVE files NOT yet marked PRESENT in this round will be flagged as MISSING.\n' +
+    'Their missing count will be incremented. Files missing 2+ rounds will trigger alerts.\n\n' +
+    'Continue?'
+  )) return;
+
+  showLoading('Running missing file audit…');
+  try {
+    const data = await apiPost('runaudit', { round });
+    hideLoading();
+    await loadStats();
+    await checkMissingAlerts();
+    showToast(
+      'Audit done! ' + (data.flagged || 0) + ' flagged MISSING, ' + (data.alreadyPresent || 0) + ' already present.',
+      'warning', '⚠️'
+    );
+  } catch (e) {
+    hideLoading();
+    showToast('Audit failed: ' + e.message, 'error', '✕');
+  }
 }
 
 // ── Voice Recognition ─────────────────────────────────────────
 function initVoiceRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    console.warn('Speech Recognition not supported');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
     const btn = document.getElementById('voice-btn');
     if (btn) {
-      btn.title = 'Voice not supported in this browser';
+      btn.title   = 'Voice not supported in this browser';
       btn.style.opacity = '0.4';
-      btn.onclick = () => showToast('Voice recognition not supported in this browser. Use Chrome or Safari.', 'warning', '⚠️');
+      btn.onclick = () => showToast('Use Chrome or Edge for voice recognition', 'warning', '⚠️');
     }
     return;
   }
 
-  const rec = new SpeechRecognition();
-  rec.continuous    = false;
+  const rec = new SR();
+  rec.continuous     = false;
   rec.interimResults = true;
-  rec.lang          = CONFIG.VOICE_LANGUAGE || 'en-US';
+  rec.lang           = CONFIG.VOICE_LANGUAGE || 'en-US';
   rec.maxAlternatives = 3;
 
-  rec.onstart = () => {
+  rec.onstart  = () => {
     state.isListening = true;
     setVoiceButtonState('listening');
     document.getElementById('transcript-display').classList.remove('hidden');
     document.getElementById('transcript-text').textContent = '…';
     document.getElementById('voice-hint').textContent = 'Listening… speak the PF number';
   };
-
-  rec.onend = () => {
+  rec.onend    = () => {
     state.isListening = false;
     setVoiceButtonState('idle');
     document.getElementById('voice-hint').textContent = 'Tap the mic and speak the PF Number';
   };
-
-  rec.onerror = (e) => {
+  rec.onerror  = (e) => {
     state.isListening = false;
     setVoiceButtonState('idle');
-    if (e.error === 'no-speech') {
-      showToast('No speech detected. Try again.', 'warning', '🎤');
-    } else if (e.error === 'not-allowed') {
-      showToast('Microphone access denied. Please allow mic permission.', 'error', '🚫');
-    } else {
-      showToast('Voice error: ' + e.error, 'error', '✕');
-    }
+    if      (e.error === 'no-speech')   showToast('No speech detected. Try again.', 'warning', '🎤');
+    else if (e.error === 'not-allowed') showToast('Microphone access denied.', 'error', '🚫');
+    else                                showToast('Voice error: ' + e.error, 'error', '✕');
   };
-
   rec.onresult = (e) => {
-    let interim = '';
-    let final   = '';
-
+    let final = '', interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript;
       if (e.results[i].isFinal) final += t;
       else interim += t;
     }
-
     const display = final || interim;
     document.getElementById('transcript-text').textContent = display;
 
@@ -560,10 +1003,10 @@ function initVoiceRecognition() {
       const pf = extractPFFromSpeech(final);
       if (pf) {
         document.getElementById('pf-input').value = pf;
-        document.getElementById('transcript-text').textContent = display + ' → ' + pf;
+        document.getElementById('transcript-text').textContent = display + ' → PF ' + pf;
         setTimeout(() => doSearch(pf), 400);
       } else {
-        showToast('Could not extract PF number from: "' + final + '"', 'warning', '🎤');
+        showToast('Could not read PF from: "' + final + '"', 'warning', '🎤');
       }
     }
   };
@@ -573,126 +1016,97 @@ function initVoiceRecognition() {
 
 function toggleVoice() {
   if (!state.recognition) {
-    showToast('Voice recognition not available. Use Chrome or Safari.', 'warning', '⚠️');
+    showToast('Voice recognition not available. Use Chrome or Edge.', 'warning', '⚠️');
     return;
   }
-  if (state.isListening) {
-    state.recognition.stop();
-  } else {
-    clearResult();
-    state.recognition.start();
-  }
+  if (state.isListening) state.recognition.stop();
+  else { clearResult(); state.recognition.start(); }
 }
 
 function setVoiceButtonState(mode) {
-  const btn    = document.getElementById('voice-btn');
-  const label  = document.getElementById('voice-status-text');
+  const btn   = document.getElementById('voice-btn');
+  const label = document.getElementById('voice-status-text');
   if (!btn) return;
-
-  if (mode === 'listening') {
-    btn.classList.add('listening');
-    if (label) label.textContent = 'LISTENING…';
-  } else {
-    btn.classList.remove('listening');
-    if (label) label.textContent = 'TAP TO SPEAK';
-  }
+  btn.classList.toggle('listening', mode === 'listening');
+  if (label) label.textContent = mode === 'listening' ? 'LISTENING…' : 'TAP TO SPEAK';
 }
 
-// ── PF Extraction from Speech ─────────────────────────────────
 function extractPFFromSpeech(transcript) {
   const text = transcript.toLowerCase().trim();
+  const direct = text.match(/\b(\d{4})\b/);
+  if (direct) return direct[1];
 
-  // 1. Direct 4-digit sequence (most common)
-  const directDigits = text.match(/\b(\d{4})\b/);
-  if (directDigits) return directDigits[1];
+  const pfPat = text.match(/\bpf\s*(?:number\s*)?(\d{1,6})\b/i);
+  if (pfPat) return pfPat[1].padStart(4, '0');
 
-  // 2. PF followed by number: "PF 4420", "PF number 4420"
-  const pfPattern = text.match(/\bpf\s*(?:number\s*)?(\d{1,6})\b/i);
-  if (pfPattern) return pfPattern[1].padStart(4, '0');
-
-  // 3. Word-form digits: "four four two zero" → "4420"
-  const wordMap = {
-    'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
-    'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
-  };
-  const words = text.split(/\s+/);
-  let digitStr = '';
-  for (const w of words) {
-    if (wordMap[w] !== undefined) {
-      digitStr += wordMap[w];
-    } else if (/^\d+$/.test(w)) {
-      digitStr += w;
-    } else if (digitStr.length >= 3) {
-      break; // stop collecting once we have enough and hit a non-digit word
-    } else {
-      if (digitStr.length > 0) break;
-    }
+  const wordMap = { zero:'0',one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',seven:'7',eight:'8',nine:'9' };
+  let ds = '';
+  for (const w of text.split(/\s+/)) {
+    if (wordMap[w]) ds += wordMap[w];
+    else if (/^\d+$/.test(w)) ds += w;
+    else if (ds.length >= 3) break;
+    else if (ds.length > 0) break;
   }
-  if (digitStr.length >= 4) return digitStr.slice(0, 4);
-  if (digitStr.length > 0)  return digitStr.padStart(4, '0');
+  if (ds.length >= 4) return ds.slice(0, 4);
+  if (ds.length > 0)  return ds.padStart(4, '0');
 
-  // 4. Any sequence of digits (fallback)
-  const anyDigits = text.replace(/\s/g, '').match(/\d{1,6}/);
-  if (anyDigits) return anyDigits[0].slice(0, 4).padStart(4, '0');
-
+  const any = text.replace(/\s/g,'').match(/\d{1,6}/);
+  if (any) return any[0].slice(0,4).padStart(4,'0');
   return null;
 }
 
-// ── Input Keyboard Handler ────────────────────────────────────
-function handleInputKey(e) {
-  if (e.key === 'Enter') searchPF();
+// ── Keyboard Handler ──────────────────────────────────────────
+function handleInputKey(e) { if (e.key === 'Enter') searchPF(); }
+
+// ── File Status Toggle ────────────────────────────────────────
+function setFileStatus(status) {
+  state.selectedFileStatus = status;
+  const activeBtn = document.getElementById('status-active-btn');
+  const exitBtn   = document.getElementById('status-exit-btn');
+  if (activeBtn && exitBtn) {
+    activeBtn.classList.toggle('active', status === 'ACTIVE');
+    exitBtn.classList.toggle('active',   status === 'EXIT');
+  }
 }
 
 // ── Settings Modal ────────────────────────────────────────────
 function openSettings() {
   closeUserMenu();
-  const modal = document.getElementById('settings-modal');
-  modal.classList.remove('hidden');
-
-  // Pre-fill current values
-  const setVal = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.value = val || '';
-  };
-  setVal('col-pf',           state.columns.PF_NUMBER    || 'A');
-  setVal('col-name',         state.columns.EMPLOYEE_NAME|| 'B');
-  setVal('col-dept',         state.columns.DEPARTMENT   || 'C');
-  setVal('col-desig',        state.columns.DESIGNATION  || 'D');
-  setVal('col-datetime',     state.columns.DATE_TIME    || 'E');
-  setVal('col-status',       state.columns.STATUS       || 'F');
-  setVal('sheet-name-input', state.sheetName || 'Sheet1');
-  setVal('header-row-input', state.headerRow || 1);
+  document.getElementById('settings-modal').classList.remove('hidden');
+  const setVal = (id, val) => { const e = document.getElementById(id); if (e) e.value = val || ''; };
+  setVal('col-pf',           state.columns.PF_NUMBER     || 'A');
+  setVal('col-name',         state.columns.EMPLOYEE_NAME || 'C');
+  setVal('col-dept',         state.columns.DEPARTMENT    || '');
+  setVal('col-desig',        state.columns.DESIGNATION   || '');
+  setVal('col-datetime',     state.columns.DATE_TIME     || 'E');
+  setVal('col-status',       state.columns.STATUS        || 'F');
+  setVal('sheet-name-input', state.sheetName             || 'Main DBase');
+  setVal('header-row-input', state.headerRow             || 1);
 }
 
-function closeSettings() {
-  document.getElementById('settings-modal').classList.add('hidden');
-}
+function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
 
 // ── User Menu ─────────────────────────────────────────────────
-function toggleUserMenu() {
-  const menu = document.getElementById('user-menu');
-  menu.classList.toggle('hidden');
-}
+function toggleUserMenu() { document.getElementById('user-menu')?.classList.toggle('hidden'); }
+function closeUserMenu()   { document.getElementById('user-menu')?.classList.add('hidden'); }
 
-function closeUserMenu() {
-  const menu = document.getElementById('user-menu');
-  if (menu) menu.classList.add('hidden');
-}
-
-// Close menu when clicking elsewhere
 document.addEventListener('click', (e) => {
   const menu  = document.getElementById('user-menu');
   const badge = document.querySelector('.user-badge');
   if (menu && !menu.contains(e.target) && badge && !badge.contains(e.target)) {
     menu.classList.add('hidden');
   }
-});
-
-function handleSignOut() {
-  if (confirm('Sign out and clear settings?')) {
-    clearAllSettings();
+  // Close report on backdrop click (outside report card)
+  const report  = document.getElementById('report-overlay');
+  if (report && !report.classList.contains('hidden')) {
+    const inner = report.querySelector('.report-header, .report-tabs, .report-body');
+    if (inner && !report.querySelector('.report-header').contains(e.target) &&
+        !report.querySelector('.report-tabs').contains(e.target) &&
+        !report.querySelector('.report-body').contains(e.target)) {
+      // Don't auto-close — user uses the ✕ button
+    }
   }
-}
+});
 
 // ── Loading Overlay ───────────────────────────────────────────
 function showLoading(text = 'Loading…') {
@@ -703,89 +1117,220 @@ function showLoading(text = 'Loading…') {
 }
 
 function hideLoading() {
-  const overlay = document.getElementById('loading-overlay');
-  if (overlay) overlay.classList.add('hidden');
+  document.getElementById('loading-overlay')?.classList.add('hidden');
 }
 
 // ── Toast Notifications ───────────────────────────────────────
 function showToast(msg, type = 'info', icon = 'ℹ️') {
   const container = document.getElementById('toast-container');
   if (!container) return;
-
   const toast = document.createElement('div');
   toast.className = 'toast ' + type;
   toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${escHtml(msg)}</span>`;
   container.appendChild(toast);
-
   setTimeout(() => {
     toast.style.animation = 'toastOut 0.3s ease forwards';
     setTimeout(() => toast.remove(), 300);
-  }, 3200);
+  }, 3500);
 }
 
 // ── Helpers ───────────────────────────────────────────────────
 function escHtml(s) {
   return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function shortTime(ts) {
   if (!ts) return '';
-  // ts format: "09/07/2026 22:20:43"
-  const parts = ts.split(' ');
-  return parts[1] || ts; // just show time portion
+  return ts.split(' ')[1] || ts;
 }
 
-// ── New Phase 2 Helpers ───────────────────────────────────────
-function setFileStatus(status) {
-  state.selectedFileStatus = status;
-  const activeBtn = document.getElementById('status-active-btn');
-  const exitBtn   = document.getElementById('status-exit-btn');
-  if (activeBtn && exitBtn) {
-    if (status === 'ACTIVE') {
-      activeBtn.classList.add('active');
-      exitBtn.classList.remove('active');
-    } else {
-      activeBtn.classList.remove('active');
-      exitBtn.classList.add('active');
-    }
-  }
-}
+// ── Compiled Report (Super Admin) ─────────────────────────────
+async function loadCompiledReport() {
+  if (!state.isAdmin) return;
+  const chart  = document.getElementById('compiled-chart');
+  const grand  = document.getElementById('compiled-grand');
+  if (chart) chart.innerHTML = '<div style="color:var(--text-muted);padding:16px 0">Loading compiled report…</div>';
 
-
-// changeCensusRound is no longer needed — round is auto-set to current month.
-
-
-
-async function triggerAudit() {
-  closeUserMenu();
-  const confirmAudit = confirm(
-    'Warning: This will audit all ACTIVE files in the sheet.\n' +
-    'Any file that is NOT marked present in the current round (' + state.selectedCensusRound + ') ' +
-    'will be flagged as MISSING. Continue?'
-  );
-  if (!confirmAudit) return;
-
-  showLoading('Running missing file audit…');
   try {
-    const data = await apiPost('audit', { round: state.selectedCensusRound });
-    hideLoading();
-    if (data.success) {
-      await loadStats();
-      showToast(
-        'Audit complete! Flagged ' + data.flaggedCount + ' files as MISSING.',
-        'warning',
-        '⚠️'
-      );
-    } else {
-      throw new Error(data.error || 'Audit failed');
-    }
+    const data = await apiFetch('compiledreport');
+    state.compiledData = data;
+    renderCompiledReport(data);
   } catch (e) {
-    hideLoading();
-    showToast('Audit failed: ' + e.message, 'error', '✕');
+    if (chart) chart.innerHTML = '<div style="color:var(--danger);padding:16px 0">Error: ' + escHtml(e.message) + '</div>';
+    showToast('Compiled report failed: ' + e.message, 'error', '✕');
   }
+}
+
+function renderCompiledReport(data) {
+  if (!data) return;
+
+  // Grand totals
+  setEl('cg-total',   data.grandTotal    || 0);
+  setEl('cg-present', data.grandPresent  || 0);
+  setEl('cg-unmarked',data.grandUnmarked || 0);
+  setEl('cg-missing', data.grandMissing  || 0);
+  setEl('cg-pct',     (data.grandPct || 0) + '%');
+  const pctFill = document.getElementById('cg-pct-fill');
+  if (pctFill) pctFill.style.width = (data.grandPct || 0) + '%';
+
+  // Per-user bar chart
+  const chart = document.getElementById('compiled-chart');
+  if (chart) {
+    chart.innerHTML = '';
+    (data.perUser || []).forEach(u => {
+      const row = document.createElement('div');
+      row.className = 'cc-row';
+
+      const pctPresent  = u.total > 0 ? (u.present  / u.total * 100) : 0;
+      const pctUnmarked = u.total > 0 ? (u.unmarked / u.total * 100) : 0;
+      const pctMissing  = u.total > 0 ? (u.missing  / u.total * 100) : 0;
+
+      row.innerHTML = `
+        <div class="cc-label">
+          <span class="cc-name">${escHtml(u.user)}</span>
+          <span class="cc-pct">${u.pct}%</span>
+        </div>
+        <div class="cc-bar-wrap">
+          <div class="cc-bar">
+            <div class="cc-seg cc-seg-present"  style="width:${pctPresent.toFixed(1)}%"  title="${u.present} Present"></div>
+            <div class="cc-seg cc-seg-unmarked" style="width:${pctUnmarked.toFixed(1)}%" title="${u.unmarked} Unmarked"></div>
+            <div class="cc-seg cc-seg-missing"  style="width:${pctMissing.toFixed(1)}%"  title="${u.missing} Missing"></div>
+          </div>
+        </div>
+        <div class="cc-nums">
+          <span class="cc-n present">${u.present}✓</span>
+          <span class="cc-n unmarked">${u.unmarked}⏳</span>
+          <span class="cc-n missing">${u.missing}🚨</span>
+          <span class="cc-n total">${u.total} total</span>
+        </div>
+      `;
+      chart.appendChild(row);
+    });
+
+    // Legend
+    const legend = document.createElement('div');
+    legend.className = 'cc-legend';
+    legend.innerHTML = `
+      <span><span class="cc-dot cc-dot-present"></span>Present</span>
+      <span><span class="cc-dot cc-dot-unmarked"></span>Unmarked</span>
+      <span><span class="cc-dot cc-dot-missing"></span>Missing</span>
+    `;
+    chart.appendChild(legend);
+  }
+
+  // Critical missing
+  const missListEl = document.getElementById('compiled-missing-list');
+  const missEmpty  = document.getElementById('compiled-missing-empty');
+  if (missListEl) {
+    missListEl.innerHTML = '';
+    const critical = data.criticalMissing || [];
+    if (!critical.length) {
+      if (missEmpty) missEmpty.classList.remove('hidden');
+    } else {
+      if (missEmpty) missEmpty.classList.add('hidden');
+      critical.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'report-file-item rfi-missing';
+        li.innerHTML = `
+          <div class="rfi-main">
+            <span class="rfi-pf">PF ${escHtml(item.pf)}</span>
+            <span class="rfi-name">${escHtml(item.name || '—')}</span>
+            <span class="rfi-critical">🚨 ${item.missingCount} rounds</span>
+          </div>
+          <div class="rfi-meta">
+            <span>User: ${escHtml(item.user)}</span>
+            ${item.custody ? '<span>' + escHtml(item.custody) + '</span>' : ''}
+            <span>Last seen: ${escHtml(item.lastSeen)}</span>
+          </div>
+        `;
+        missListEl.appendChild(li);
+      });
+    }
+  }
+}
+
+// ── Census Timeline ───────────────────────────────────────────
+function toggleCensusTimeline() {
+  const body = document.getElementById('census-timeline-body');
+  const icon = document.getElementById('census-timeline-icon');
+  if (!body) return;
+
+  const isHidden = body.classList.contains('hidden');
+  body.classList.toggle('hidden', !isHidden);
+  if (icon) icon.textContent = isHidden ? '▲' : '▼';
+
+  if (isHidden && !state.censusTimelineLoaded && state.currentResult) {
+    loadCensusTimeline(state.currentResult.pf);
+  }
+}
+
+async function loadCensusTimeline(pf) {
+  const wrap    = document.getElementById('census-timeline-wrap');
+  const loading = document.getElementById('census-timeline-loading');
+  if (!wrap) return;
+
+  if (loading) loading.style.display = '';
+  wrap.innerHTML = '';
+
+  try {
+    const data = await apiFetch('censustimeline', { pf });
+    if (loading) loading.style.display = 'none';
+    state.censusTimelineLoaded = true;
+    renderCensusTimeline(data);
+  } catch (e) {
+    if (loading) loading.style.display = 'none';
+    wrap.innerHTML = '<div class="move-empty">Could not load census history.</div>';
+  }
+}
+
+function renderCensusTimeline(data) {
+  const wrap = document.getElementById('census-timeline-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const timeline = data.timeline || [];
+  if (!timeline.length) {
+    wrap.innerHTML = '<div class="move-empty">No census history recorded for this file.</div>';
+    return;
+  }
+
+  // Summary header
+  const summary = document.createElement('div');
+  summary.className = 'ct-summary';
+  const lastSeen  = data.lastSeen        ? '✓ Last seen: <strong>' + escHtml(data.lastSeen)        + '</strong>' : '';
+  const declared  = data.declaredMissing ? ' | 🚨 Missing from: <strong>' + escHtml(data.declaredMissing) + '</strong>' : '';
+  summary.innerHTML = lastSeen + declared;
+  wrap.appendChild(summary);
+
+  // Timeline rail
+  const rail = document.createElement('div');
+  rail.className = 'ct-rail';
+
+  timeline.forEach((entry, idx) => {
+    const dot = document.createElement('div');
+    dot.className = 'ct-item';
+
+    const isPresent = entry.flag === 'PRESENT' || entry.flag === 'LOCATED';
+    const isMissing = entry.flag === 'MISSING';
+    const isLast    = idx === timeline.length - 1;
+
+    dot.innerHTML = `
+      <div class="ct-dot ${isPresent ? 'ct-dot-present' : isMissing ? 'ct-dot-missing' : 'ct-dot-neutral'}">
+        ${isPresent ? '✓' : isMissing ? '✗' : '?'}
+      </div>
+      <div class="ct-info">
+        <div class="ct-round">${escHtml(entry.round)}</div>
+        <div class="ct-flag ct-flag-${entry.flag.toLowerCase()}">${escHtml(entry.flag)}</div>
+        ${entry.custody  ? '<div class="ct-detail">' + escHtml(entry.custody) + '</div>' : ''}
+        ${entry.operator ? '<div class="ct-detail">by ' + escHtml(entry.operator) + '</div>' : ''}
+        ${entry.timestamp? '<div class="ct-detail ct-ts">' + escHtml(entry.timestamp) + '</div>' : ''}
+      </div>
+      ${!isLast ? '<div class="ct-line"></div>' : ''}
+    `;
+    rail.appendChild(dot);
+  });
+
+  wrap.appendChild(rail);
 }
 

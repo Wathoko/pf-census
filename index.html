@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="PF Census" />
-  <meta name="description" content="Physical File Census Tracker — mark files as present with voice or manual input" />
+  <meta name="description" content="Physical File Census Tracker — mark files as present, track locations, and generate weeding reports." />
   <title>PF File Census</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
@@ -27,14 +27,21 @@
       <div class="header-left">
         <span class="header-icon">📁</span>
         <div>
-          <h1 class="header-title">PF Census</h1>
+          <h1 class="header-title" id="header-user-name">PF Census</h1>
+          <p class="header-batches" id="header-user-batches">Batches: Loading...</p>
           <p class="header-sheet" id="sheet-info">Connecting…</p>
         </div>
       </div>
       <div class="header-right">
         <!-- Auto Census Month Badge -->
         <div class="month-badge" id="month-badge" title="Current census month"></div>
-        
+
+        <!-- Missing file alert badge -->
+        <div class="missing-alert-badge hidden" id="missing-alert-badge"
+             onclick="openReportScreen('missing')" title="Files missing 2+ census rounds">
+          <span id="missing-alert-count">0</span>⚠
+        </div>
+
         <div class="user-badge" id="user-badge" onclick="toggleUserMenu()" aria-label="Menu">
           <span id="user-initial">👤</span>
         </div>
@@ -43,11 +50,13 @@
 
     <!-- ── User Menu ── -->
     <div id="user-menu" class="user-menu hidden" role="menu">
-      <button class="menu-item" onclick="triggerAudit()">⚠️ Audit Missing Files</button>
+      <button class="menu-item" onclick="openReportScreen('summary')">📊 Weeding Report</button>
+      <button class="menu-item" onclick="openReportScreen('missing')">🚨 Missing File Alerts</button>
+      <button class="menu-item" onclick="triggerAudit()">⚠️ Run Audit</button>
       <button class="menu-item" onclick="openSettings()">⚙️ Column Settings</button>
       <button class="menu-item" onclick="refreshData()">🔄 Refresh Data</button>
       <hr class="menu-divider" />
-      <button class="menu-item danger" onclick="handleSignOut()">🔌 Change Sheet URL</button>
+      <button class="menu-item danger" onclick="handleLogout()">🚪 Logout Colleague</button>
     </div>
 
     <!-- ── Stats Bar ── -->
@@ -65,6 +74,11 @@
       <div class="stat-item stat-missing">
         <span class="stat-value" id="stat-missing" aria-label="Missing count">0</span>
         <span class="stat-label">Missing</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="stat-unmarked">0</span>
+        <span class="stat-label">Unmarked</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
@@ -162,6 +176,12 @@
             <div class="result-badge" id="current-status-badge"></div>
           </div>
 
+          <!-- Missing Alert Banner (shown when missing 2+ rounds) -->
+          <div id="missing-warn-banner" class="missing-warn-banner hidden">
+            🚨 <strong>File Missing Alert</strong> — this file has been flagged missing
+            <span id="missing-warn-count"></span> census round(s). Please update its location once found.
+          </div>
+
           <div class="employee-details">
             <div class="detail-row" id="status-row">
               <span class="detail-icon" aria-hidden="true">💼</span>
@@ -178,10 +198,15 @@
               <span class="detail-label">Last Marked</span>
               <span class="detail-value" id="emp-last-marked">—</span>
             </div>
+            <div class="detail-row" id="custody-display-row">
+              <span class="detail-icon" aria-hidden="true">📍</span>
+              <span class="detail-label">Current Location</span>
+              <span class="detail-value" id="emp-current-custody">—</span>
+            </div>
 
             <hr class="detail-divider">
 
-            <!-- New Fields Form for Mark Present -->
+            <!-- File Status Toggle -->
             <div class="form-row">
               <label class="form-label">File Status</label>
               <div class="status-toggle-group">
@@ -190,16 +215,60 @@
               </div>
             </div>
 
+            <!-- Custody Location Selector -->
             <div class="form-row">
               <label class="form-label" for="custody-select">Custody Location</label>
               <select id="custody-select" class="form-select">
                 <option value="REGISTRY">REGISTRY</option>
-                <option value="CEOS OFFICE">CEOS OFFICE</option>
+                <option value="CEO'S OFFICE">CEO'S OFFICE</option>
                 <option value="DIRECTOR HR OFFICE">DIRECTOR HR OFFICE</option>
                 <option value="DISCIPLINE">DISCIPLINE</option>
                 <option value="RESOURCING">RESOURCING</option>
+                <option value="AUDIT">AUDIT</option>
+                <option value="SALARIES">SALARIES</option>
+                <option value="PROMOTION">PROMOTION</option>
+                <option value="DEPUTY HR">DEPUTY HR</option>
+                <option value="FELIX KOSGEY OFFICE">FELIX KOSGEY OFFICE</option>
+                <option value="EMPLOYEE RELATIONS">EMPLOYEE RELATIONS</option>
+                <option value="FINANCE">FINANCE</option>
+                <option value="HOD RM">HOD RM</option>
+                <option value="DEPUTY CEO AF">DEPUTY CEO AF</option>
+                <option value="DEPUTY CEO CS">DEPUTY CEO CS</option>
+                <option value="DIRECTOR NURSING">DIRECTOR NURSING</option>
+                <option value="DEPUTY DIRECTOR NURSING - CAROLINE SANG">DEPUTY DIRECTOR NURSING - CAROLINE SANG</option>
+                <option value="DEPUTY DIRECTOR NURSING - MARGARET MUNGAI">DEPUTY DIRECTOR NURSING - MARGARET MUNGAI</option>
+                <option value="OAS OFFICE">OAS OFFICE</option>
+                <option value="CHERES OFFICE">CHERES OFFICE</option>
               </select>
             </div>
+
+            <!-- Update Location only (for located/missing files) -->
+            <div class="form-row" id="update-location-row" style="display:none">
+              <button class="btn-update-location" id="update-location-btn" onclick="updateFileLocation()">
+                📍 Update Location Only
+              </button>
+            </div>
+
+            <!-- Movement History (collapsed by default) -->
+            <div class="movement-history-toggle" id="movement-history-toggle" onclick="toggleMovementHistory()" style="display:none">
+              <span>📋 Location Movement History</span>
+              <span id="movement-toggle-icon">▼</span>
+            </div>
+            <div class="movement-history-body hidden" id="movement-history-body">
+              <div class="movement-loading" id="movement-loading">Loading…</div>
+              <ul class="movement-list" id="movement-list"></ul>
+            </div>
+
+            <!-- Census Timeline (month-by-month sighting history) -->
+            <div class="movement-history-toggle" id="census-timeline-toggle" onclick="toggleCensusTimeline()" style="display:none">
+              <span>📅 Census Sighting History</span>
+              <span id="census-timeline-icon">▼</span>
+            </div>
+            <div class="movement-history-body hidden" id="census-timeline-body">
+              <div class="movement-loading" id="census-timeline-loading">Loading…</div>
+              <div class="census-timeline-wrap" id="census-timeline-wrap"></div>
+            </div>
+
           </div>
 
           <div class="result-actions">
@@ -240,6 +309,126 @@
     </main>
   </div>
 
+  <!-- ===== REPORT OVERLAY ===== -->
+  <div id="report-overlay" class="report-overlay hidden" role="dialog" aria-label="Weeding Report">
+    <div class="report-header">
+      <div class="report-header-left">
+        <h2 class="report-title" id="report-title">📊 Weeding Report</h2>
+        <p class="report-subtitle" id="report-subtitle"></p>
+      </div>
+      <button class="report-close" onclick="closeReportScreen()" aria-label="Close">✕</button>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="report-tabs">
+      <button class="report-tab active" id="tab-summary" onclick="switchReportTab('summary')">Summary</button>
+      <button class="report-tab" id="tab-missing" onclick="switchReportTab('missing')">🚨 Missing</button>
+      <button class="report-tab" id="tab-unmarked" onclick="switchReportTab('unmarked')">⏳ Unmarked</button>
+      <button class="report-tab" id="tab-marked" onclick="switchReportTab('marked')">✅ Marked</button>
+      <button class="report-tab admin-tab hidden" id="tab-compiled" onclick="switchReportTab('compiled')">🏛 All Users</button>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="report-body" id="report-body">
+      <div class="report-loading" id="report-loading">
+        <div class="report-spinner"></div>
+        <p>Loading report…</p>
+      </div>
+
+      <!-- SUMMARY TAB -->
+      <div class="report-tab-content" id="tab-content-summary">
+        <div class="report-summary-grid">
+          <div class="report-stat-card stat-card-total">
+            <div class="rsc-value" id="rsc-total">—</div>
+            <div class="rsc-label">Total Active Files</div>
+          </div>
+          <div class="report-stat-card stat-card-marked">
+            <div class="rsc-value" id="rsc-marked">—</div>
+            <div class="rsc-label">Marked Present ✓</div>
+          </div>
+          <div class="report-stat-card stat-card-unmarked">
+            <div class="rsc-value" id="rsc-unmarked">—</div>
+            <div class="rsc-label">Not Yet Updated</div>
+          </div>
+          <div class="report-stat-card stat-card-missing">
+            <div class="rsc-value" id="rsc-missing">—</div>
+            <div class="rsc-label">Flagged Missing</div>
+          </div>
+        </div>
+        <!-- Completion ring / progress -->
+        <div class="report-progress-wrap">
+          <div class="report-progress-label">Completion: <span id="rsc-percent">0%</span></div>
+          <div class="report-progress-bar">
+            <div class="report-progress-fill" id="rsc-progress-fill" style="width:0%"></div>
+          </div>
+        </div>
+        <p class="report-month-label" id="report-month-label"></p>
+      </div>
+
+      <!-- MISSING TAB -->
+      <div class="report-tab-content hidden" id="tab-content-missing">
+        <p class="report-section-note" id="missing-note"></p>
+        <ul class="report-file-list" id="missing-file-list"></ul>
+        <div class="report-empty hidden" id="missing-empty">✅ No missing files! Great work.</div>
+      </div>
+
+      <!-- UNMARKED TAB -->
+      <div class="report-tab-content hidden" id="tab-content-unmarked">
+        <p class="report-section-note" id="unmarked-note"></p>
+        <ul class="report-file-list" id="unmarked-file-list"></ul>
+        <div class="report-empty hidden" id="unmarked-empty">✅ All files have been marked!</div>
+      </div>
+
+      <!-- MARKED TAB -->
+      <div class="report-tab-content hidden" id="tab-content-marked">
+        <p class="report-section-note" id="marked-note"></p>
+        <ul class="report-file-list" id="marked-file-list"></ul>
+        <div class="report-empty hidden" id="marked-empty">No files marked yet this month.</div>
+      </div>
+
+      <!-- COMPILED (ADMIN) TAB -->
+      <div class="report-tab-content hidden" id="tab-content-compiled">
+        <!-- Grand totals -->
+        <div class="compiled-grand" id="compiled-grand">
+          <div class="compiled-grand-row">
+            <div class="cg-card cg-total">
+              <div class="cg-val" id="cg-total">—</div>
+              <div class="cg-lbl">Total Files</div>
+            </div>
+            <div class="cg-card cg-present">
+              <div class="cg-val" id="cg-present">—</div>
+              <div class="cg-lbl">Present ✓</div>
+            </div>
+            <div class="cg-card cg-unmarked">
+              <div class="cg-val" id="cg-unmarked">—</div>
+              <div class="cg-lbl">Unmarked</div>
+            </div>
+            <div class="cg-card cg-missing">
+              <div class="cg-val" id="cg-missing">—</div>
+              <div class="cg-lbl">Missing 🚨</div>
+            </div>
+          </div>
+          <div class="cg-pct-wrap">
+            <div class="cg-pct-label">Overall Completion: <strong id="cg-pct">0%</strong></div>
+            <div class="report-progress-bar">
+              <div class="report-progress-fill" id="cg-pct-fill" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-user bar chart -->
+        <h3 class="compiled-section-title">👤 Per-User Progress</h3>
+        <div class="compiled-chart" id="compiled-chart"></div>
+
+        <!-- Critical missing files across all users -->
+        <h3 class="compiled-section-title">🚨 Critical Missing Files (2+ rounds)</h3>
+        <ul class="report-file-list" id="compiled-missing-list"></ul>
+        <div class="report-empty hidden" id="compiled-missing-empty">✅ No critical missing files.</div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ===== SETTINGS MODAL ===== -->
   <div id="settings-modal" class="modal hidden" role="dialog" aria-label="Column Settings">
     <div class="modal-backdrop" onclick="closeSettings()"></div>
@@ -259,19 +448,19 @@
         </div>
         <div class="setting-group">
           <label class="setting-label" for="col-name">Employee Name Column</label>
-          <input type="text" class="setting-input" id="col-name" maxlength="2" placeholder="B" />
+          <input type="text" class="setting-input" id="col-name" maxlength="2" placeholder="C" />
         </div>
         <div class="setting-group">
           <label class="setting-label" for="col-dept">
             Department Column <span class="optional">(optional)</span>
           </label>
-          <input type="text" class="setting-input" id="col-dept" maxlength="2" placeholder="C" />
+          <input type="text" class="setting-input" id="col-dept" maxlength="2" placeholder="—" />
         </div>
         <div class="setting-group">
           <label class="setting-label" for="col-desig">
             Designation Column <span class="optional">(optional)</span>
           </label>
-          <input type="text" class="setting-input" id="col-desig" maxlength="2" placeholder="D" />
+          <input type="text" class="setting-input" id="col-desig" maxlength="2" placeholder="—" />
         </div>
         <div class="setting-group">
           <label class="setting-label" for="col-datetime">Date &amp; Time Column</label>
@@ -283,7 +472,7 @@
         </div>
         <div class="setting-group">
           <label class="setting-label" for="sheet-name-input">Sheet Tab Name</label>
-          <input type="text" class="setting-input" id="sheet-name-input" placeholder="Sheet1" style="text-transform:none" />
+          <input type="text" class="setting-input" id="sheet-name-input" placeholder="Main DBase" style="text-transform:none" />
         </div>
         <div class="setting-group">
           <label class="setting-label" for="header-row-input">Header Row Number</label>

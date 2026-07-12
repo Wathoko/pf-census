@@ -1,49 +1,56 @@
 // ============================================================
 // PF CENSUS APP - CONFIGURATION
 // ============================================================
-// These are the default column settings for your sheet.
-// You can also change them inside the app via Settings.
-// ============================================================
-
 const CONFIG = {
 
-  // --- Google Sheet & Apps Script ---
-  SPREADSHEET_ID: '1-MpfWf3JqVAxdwo59eV6wd2Lv37YN-wa',
+  // ── Permanent Apps Script URL (no setup required) ──────────
+  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwo_g1LJw30SH48wU6zOcVnWDFHCb0fLt20peWEVaDUgpwJHsf69GzRBgnnMVNnMDMY/exec',
 
-  // This will be set by the user on first launch (Apps Script URL)
-  SCRIPT_URL: '',
+  // ── Sheet Tab Names ────────────────────────────────────────
+  SHEET_NAME:  'Main DBase',   // Master database tab
 
-  // --- Sheet Tab Name ---
-  // The name of the tab at the bottom of your Google Sheet
-  SHEET_NAME: 'Sheet1',
+  // ── PF Format ──────────────────────────────────────────────
+  PF_FORMAT: 'numeric',
+  PF_DIGITS: 4,
 
-  // --- Column Mappings (column LETTERS) ---
+  // ── Column Mappings (column LETTERS) ──────────────────────
   COLUMNS: {
-    PF_NUMBER:     'A',   // ✅ PF Number column
-    EMPLOYEE_NAME: 'B',   // Employee name (adjust if needed)
-    DEPARTMENT:    'C',   // Department (adjust or leave empty)
-    DESIGNATION:   'D',   // Designation (adjust or leave empty)
-    DATE_TIME:     'E',   // ✅ Date & Time stamp column
-    STATUS:        'F',   // ✅ PRESENT status column
+    PF_NUMBER:     'A',
+    EMPLOYEE_NAME: 'C',
+    DATE_TIME:     'E',
+    STATUS:        'F',
   },
 
-  // --- Row Settings ---
-  HEADER_ROW: 1,
+  HEADER_ROW:    1,
   DATA_START_ROW: 2,
 
-  // --- PF Number Format ---
-  // 'numeric'  = 4 digits like 4420 (pad with zeros if needed)
-  // 'text'     = match exactly as typed/spoken
-  PF_FORMAT: 'numeric',
-  PF_DIGITS: 4,   // expected length, e.g. 4 for "4420"
+  // ── Custody Locations ─────────────────────────────────────
+  LOCATIONS: [
+    'REGISTRY',
+    'CEO\'S OFFICE',
+    'DIRECTOR HR OFFICE',
+    'DISCIPLINE',
+    'RESOURCING',
+    'AUDIT',
+    'SALARIES',
+    'PROMOTION',
+    'DEPUTY HR',
+    'FELIX KOSGEY OFFICE',
+    'EMPLOYEE RELATIONS',
+    'FINANCE',
+    'HOD RM',
+    'DEPUTY CEO AF',
+    'DEPUTY CEO CS',
+    'DIRECTOR NURSING',
+    'DEPUTY DIRECTOR NURSING - CAROLINE SANG',
+    'DEPUTY DIRECTOR NURSING - MARGARET MUNGAI',
+    'OAS OFFICE',
+    'CHERES OFFICE',
+  ],
 
-  // --- Status Labels ---
+  // ── App Info ──────────────────────────────────────────────
   STATUS_PRESENT: 'PRESENT',
-
-  // --- Voice Recognition ---
   VOICE_LANGUAGE: 'en-US',
-
-  // --- App Info ---
-  APP_NAME: 'PF Census',
-  ORG_NAME: 'Physical File Tracker',
+  APP_NAME:       'PF Census',
+  ORG_NAME:       'Physical File Tracker',
 };
