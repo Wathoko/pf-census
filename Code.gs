@@ -154,14 +154,34 @@ function registerUser(p) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Check duplicate PF across other users (excluding this user)
+  // Check duplicate PF and overlapping batches across other users (excluding own sheet)
   const allSheets = ss.getSheets();
   for (const sh of allSheets) {
-    if (sh.getName().toUpperCase() === firstName) continue; // skip own sheet
+    if (sh.getName().toUpperCase() === firstName) continue;
     const meta = sh.getDeveloperMetadata();
+    
+    let otherPF = '';
+    let otherBatches = [];
     for (const m of meta) {
-      if (m.getKey() === 'pf' && m.getValue() === pf)
-        throw new Error('PF ' + pf + ' is already registered under another user.');
+      if (m.getKey() === 'pf')      otherPF = m.getValue();
+      if (m.getKey() === 'batches') {
+        try {
+          otherBatches = JSON.parse(m.getValue() || '[]');
+        } catch (e) { otherBatches = []; }
+      }
+    }
+
+    if (otherPF && otherPF === pf) {
+      throw new Error('Personal PF ' + pf + ' is already registered under ' + sh.getName() + '.');
+    }
+
+    // Check batch range overlaps
+    for (const a of batches) {
+      for (const b of otherBatches) {
+        if (parseInt(a.from, 10) <= parseInt(b.to, 10) && parseInt(b.from, 10) <= parseInt(a.to, 10)) {
+          throw new Error('Batch ' + a.from + '-' + a.to + ' overlaps with ' + sh.getName() + '\'s batch: ' + b.from + '-' + b.to + '. Contact them to resolve.');
+        }
+      }
     }
   }
 
