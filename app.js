@@ -1659,8 +1659,9 @@ async function removePF(pf) {
   }
 }
 
-// ── Barcode Scanner ──────────────────────────────────────────
+// ── Barcode & OCR Scanner ────────────────────────────────────
 let html5QrScanner = null;
+let ocrStream = null;
 
 async function startScanner() {
   // Show scanner modal
@@ -1669,28 +1670,61 @@ async function startScanner() {
   // Clear any existing input
   clearResult();
   
-  // Initialize scanner
+  // Default to barcode tab on launch
+  switchScannerTab('barcode');
+}
+
+function stopScanner() {
+  document.getElementById('scanner-overlay').classList.remove('active');
+  stopBarcodeScanner();
+  stopOcrCamera();
+}
+
+function switchScannerTab(tab) {
+  state.activeScannerTab = tab;
+  
+  // Update tab headers active states
+  const stabBarcode = document.getElementById('stab-barcode');
+  const stabOcr = document.getElementById('stab-ocr');
+  if (stabBarcode) stabBarcode.classList.toggle('active', tab === 'barcode');
+  if (stabOcr)     stabOcr.classList.toggle('active', tab === 'ocr');
+  
+  // Toggle contents visibility
+  const bc = document.getElementById('scanner-content-barcode');
+  const oc = document.getElementById('scanner-content-ocr');
+  if (bc) bc.classList.toggle('hidden', tab !== 'barcode');
+  if (oc) oc.classList.toggle('hidden', tab !== 'ocr');
+  
+  if (tab === 'barcode') {
+    stopOcrCamera();
+    startBarcodeScanner();
+  } else {
+    stopBarcodeScanner();
+    startOcrCamera();
+  }
+}
+
+async function startBarcodeScanner() {
+  if (html5QrScanner) return; // already running
+  
   try {
     html5QrScanner = new Html5Qrcode("scanner-reader");
     
     const config = { 
       fps: 10, 
       qrbox: (width, height) => {
-        // Barcode-style rectangular box (wider, shorter)
         return { width: Math.round(width * 0.75), height: Math.round(height * 0.4) };
       },
       aspectRatio: 1.333333
     };
     
-    // Start camera stream (prefer back/environment camera)
     await html5QrScanner.start(
       { facingMode: "environment" }, 
       config, 
       (decodedText, decodedResult) => {
-        // On successful scan, close and process
         stopScanner();
         
-        // Clean scanned text: extract first sequence of digits
+        // Extract first digit sequence
         const pfMatch = decodedText.match(/\d+/);
         if (pfMatch) {
           const scannedPF = pfMatch[0];
@@ -1698,28 +1732,23 @@ async function startScanner() {
           showToast('Scanned PF ' + scannedPF, 'success', '📷');
           doSearch(scannedPF);
         } else {
-          showToast('Could not find numeric PF in code: ' + decodedText, 'warning', '⚠️');
+          showToast('Could not find numeric PF in barcode: ' + decodedText, 'warning', '⚠️');
         }
       },
-      (errorMessage) => {
-        // Silent loop callback for scan frames
-      }
+      (errorMessage) => {}
     );
   } catch (err) {
-    console.error("Camera scanner error:", err);
-    showToast("Camera access failed: " + err.message, "error", "✕");
-    stopScanner();
+    console.error("Barcode start failed:", err);
+    showToast("Barcode camera error: " + err.message, "error", "✕");
   }
 }
 
-function stopScanner() {
-  document.getElementById('scanner-overlay').classList.remove('active');
+function stopBarcodeScanner() {
   if (html5QrScanner) {
     try {
       html5QrScanner.stop().then(() => {
         html5QrScanner = null;
       }).catch(e => {
-        console.warn("Scanner stop error:", e);
         html5QrScanner = null;
       });
     } catch (e) {
@@ -1727,6 +1756,93 @@ function stopScanner() {
     }
   }
 }
+
+async function startOcrCamera() {
+  if (ocrStream) return; // already streaming
+  
+  const video = document.getElementById('ocr-video');
+  if (!video) return;
+  
+  try {
+    ocrStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = ocrStream;
+  } catch (err) {
+    console.error("OCR stream failed:", err);
+    showToast("OCR camera stream failed: " + err.message, "error", "✕");
+  }
+}
+
+function stopOcrCamera() {
+  if (ocrStream) {
+    try {
+      ocrStream.getTracks().forEach(track => track.stop());
+      ocrStream = null;
+    } catch (e) {
+      ocrStream = null;
+    }
+  }
+  const video = document.getElementById('ocr-video');
+  if (video) video.srcObject = null;
+}
+
+async function captureAndOcr() {
+  const video  = document.getElementById('ocr-video');
+  const canvas = document.getElementById('ocr-canvas');
+  if (!video || !canvas) return;
+  
+  showLoading('Analyzing image with OCR…');
+  
+  try {
+    // Snap current frame from video feed
+    const width  = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+    canvas.width  = width;
+    canvas.height = height;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, width, height);
+    
+    // Check if Tesseract library is loaded
+    if (typeof Tesseract === 'undefined') {
+      throw new Error('Tesseract OCR library not loaded. Check internet connection.');
+    }
+    
+    // Run OCR (eng language model)
+    const result = await Tesseract.recognize(canvas, 'eng', {
+      logger: m => console.log('OCR progress:', m)
+    });
+    
+    hideLoading();
+    stopScanner();
+    
+    const text = result.data.text || '';
+    console.log("OCR Extracted Text:", text);
+    
+    // Extract first sequence of 3 to 6 digits (since PFs are usually 4 digits)
+    const pfMatch = text.match(/\b\d{3,6}\b/) || text.match(/\d+/);
+    
+    if (pfMatch) {
+      const recognizedPF = pfMatch[0];
+      const inputEl = document.getElementById('pf-input');
+      if (inputEl) {
+        inputEl.value = recognizedPF;
+        // Don't auto-search! Let the user verify and edit it if it read wrongly.
+        showToast('Recognized PF: ' + recognizedPF + ' (Verify and search)', 'success', '✍️');
+        inputEl.focus();
+      }
+    } else {
+      showToast('Could not read any numbers. Please type manually or try again.', 'warning', '⚠️');
+    }
+  } catch (err) {
+    hideLoading();
+    console.error("OCR analysis failed:", err);
+    showToast('OCR failed: ' + err.message, 'error', '✕');
+  }
+}
+
 
 
 
