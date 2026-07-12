@@ -128,6 +128,7 @@ function doPost(e) {
     if (action === 'runaudit')        return ok(runAudit(body));
     if (action === 'updatelocation')  return ok(updateLocation(body));
     if (action === 'updatebatches')    return ok(updateBatches(body));
+    if (action === 'removepf')         return ok(removePfFromBatch(body));
 
     return err('Unknown action: ' + action);
   } catch (ex) {
@@ -1009,4 +1010,54 @@ function getCompiledReport(username, round) {
     userCount: sheets.length,
   };
 }
+
+// ── removePfFromBatch ────────────────────────────────────────
+// Permanently removes a single PF row from the user's personal sheet.
+// Used when a PF was incorrectly included in their batch range.
+// Safety check: PF must exist in THIS user's sheet (not another user's).
+function removePfFromBatch(p) {
+  const pfInput  = String(p.pf       || '').trim();
+  const username = String(p.username || '').trim().toUpperCase();
+
+  if (!pfInput || !username) throw new Error('PF and username are required');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Find user sheet case-insensitively
+  let userSheet = null;
+  const allSheets = ss.getSheets();
+  for (const sh of allSheets) {
+    if (sh.getName().toUpperCase() === username) {
+      userSheet = sh;
+      break;
+    }
+  }
+  if (!userSheet) throw new Error('Your sheet tab was not found');
+
+  const query = normalizePF(pfInput);
+  const data  = userSheet.getDataRange().getValues();
+
+  for (let i = DATA_START_ROW - 1; i < data.length; i++) {
+    if (normalizePF(String(data[i][COL_PF - 1])) !== query) continue;
+
+    const name = String(data[i][COL_NAME - 1] || '').trim();
+
+    // Delete the row (sheet rows are 1-indexed, data array is 0-indexed)
+    userSheet.deleteRow(i + 1);
+    SpreadsheetApp.flush();
+
+    // Log this removal in Census History for audit trail
+    const now = ts();
+    const histSheet = getOrCreateHistorySheet();
+    histSheet.appendRow([
+      now, pfInput, name, username, 'REMOVED FROM BATCH',
+      '', '', currentMonth(), 'Manual removal by ' + username
+    ]);
+
+    return { removed: true, pf: pfInput, name };
+  }
+
+  throw new Error('PF ' + pfInput + ' was not found in your batch sheet');
+}
+
 

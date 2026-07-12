@@ -3,39 +3,52 @@
    ============================================================ */
 
 /* ── Google Fonts ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
-/* ── CSS Variables ── */
+/* ── CSS Variables — MTRH Brand Theme ── */
 :root {
-  --bg-base:        #080d14;
-  --bg-card:        #0e1521;
-  --bg-card-hover:  #121b2a;
-  --bg-elevated:    #16202e;
-  --bg-input:       #0b1420;
+  /* MTRH Brand Colors */
+  --mtrh-maroon:    #8B1A27;   /* primary maroon/dark red */
+  --mtrh-maroon-dk: #6B1220;   /* darker maroon for hover */
+  --mtrh-blue:      #1A5EA8;   /* MTRH corporate blue */
+  --mtrh-blue-dk:   #144a87;   /* darker blue */
+  --mtrh-gold:      #D4A017;   /* accent gold for badges */
 
-  --accent:         #00e57a;
-  --accent-dim:     rgba(0, 229, 122, 0.15);
-  --accent-glow:    rgba(0, 229, 122, 0.4);
+  --bg-base:        #060b10;
+  --bg-card:        #0c1420;
+  --bg-card-hover:  #101b2a;
+  --bg-elevated:    #131e2c;
+  --bg-input:       #091320;
 
-  --danger:         #ff4d6d;
-  --danger-dim:     rgba(255, 77, 109, 0.15);
+  --accent:         #1A5EA8;   /* MTRH blue as primary accent */
+  --accent-dim:     rgba(26, 94, 168, 0.18);
+  --accent-glow:    rgba(26, 94, 168, 0.35);
 
-  --warning:        #ffb703;
-  --warning-dim:    rgba(255, 183, 3, 0.15);
+  --accent2:        #8B1A27;   /* MTRH maroon as secondary accent */
+  --accent2-dim:    rgba(139, 26, 39, 0.18);
+
+  --danger:         #e03a4e;
+  --danger-dim:     rgba(224, 58, 78, 0.15);
+
+  --warning:        #D4A017;
+  --warning-dim:    rgba(212, 160, 23, 0.15);
+
+  --success:        #1A5EA8;
+  --success-dim:    rgba(26, 94, 168, 0.18);
 
   --text-primary:   #e8edf5;
   --text-secondary: #7b8ea8;
   --text-muted:     #45556e;
 
   --border:         rgba(255,255,255,0.07);
-  --border-focus:   rgba(0, 229, 122, 0.5);
+  --border-focus:   rgba(26, 94, 168, 0.55);
 
   --radius-sm:      8px;
   --radius-md:      14px;
   --radius-lg:      20px;
   --radius-xl:      28px;
 
-  --shadow-card:    0 4px 24px rgba(0,0,0,0.4);
+  --shadow-card:    0 4px 24px rgba(0,0,0,0.45);
   --shadow-glow:    0 0 30px var(--accent-glow);
 
   --transition:     0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -54,7 +67,7 @@ html {
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Roboto', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg-base);
   color: var(--text-primary);
   min-height: 100vh;
@@ -72,10 +85,48 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(0,229,122,0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0,100,255,0.04) 0%, transparent 60%);
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(26,94,168,0.08) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139,26,39,0.06) 0%, transparent 60%);
   pointer-events: none;
   z-index: 0;
+}
+
+/* ── MTRH logo header brand strip ── */
+.mtrh-brand-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px 6px;
+  background: linear-gradient(90deg, var(--mtrh-maroon) 0%, #6B1220 100%);
+  border-bottom: 3px solid var(--mtrh-blue);
+}
+.mtrh-brand-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: contain;
+  background: white;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.mtrh-brand-text {
+  flex: 1;
+}
+.mtrh-brand-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+  font-family: 'Roboto', sans-serif;
+  text-transform: uppercase;
+}
+.mtrh-brand-tagline {
+  font-size: 9px;
+  color: rgba(255,255,255,0.75);
+  font-weight: 400;
+  letter-spacing: 0.2px;
+  font-style: italic;
 }
 
 /* ── Overlay (Auth / Setup) ── */
@@ -112,7 +163,7 @@ body::before {
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -1px;
-  background: linear-gradient(135deg, #fff 30%, var(--accent));
+  background: linear-gradient(135deg, #fff 30%, var(--mtrh-blue, #1A5EA8));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -187,19 +238,19 @@ body::before {
   gap: 10px;
   width: 100%;
   padding: 16px 24px;
-  background: var(--accent);
-  color: #000;
+  background: linear-gradient(135deg, var(--mtrh-blue, #1A5EA8) 0%, #144a87 100%);
+  color: #fff;
   border: none;
   border-radius: var(--radius-lg);
   font-size: 15px;
   font-weight: 700;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Roboto', 'Inter', sans-serif;
   cursor: pointer;
   transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
   letter-spacing: 0.2px;
   margin-top: 16px;
 }
-.btn-primary:hover  { box-shadow: var(--shadow-glow); opacity: 0.92; }
+.btn-primary:hover  { box-shadow: 0 0 20px rgba(26,94,168,0.5); opacity: 0.92; }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
@@ -234,24 +285,34 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: calc(12px + var(--safe-top)) 20px 12px;
-  background: rgba(8, 13, 20, 0.9);
+  padding: calc(10px + var(--safe-top)) 16px 10px;
+  background: rgba(6, 11, 16, 0.94);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2px solid var(--mtrh-blue, #1A5EA8);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+.header-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: contain;
+  background: white;
+  padding: 2px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--mtrh-blue, #1A5EA8);
 }
 .header-icon { font-size: 24px; }
 .header-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #fff, var(--accent));
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #fff 40%, var(--mtrh-blue, #1A5EA8));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -799,13 +860,13 @@ body::before {
 
 /* Auto Month Badge in header */
 .month-badge {
-  background: var(--accent-dim);
-  border: 1.5px solid var(--accent);
+  background: rgba(26,94,168,0.18);
+  border: 1.5px solid var(--mtrh-blue, #1A5EA8);
   border-radius: 20px;
   padding: 5px 12px;
   font-size: 11px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--mtrh-blue, #1A5EA8);
   letter-spacing: 0.4px;
   margin-right: 10px;
   white-space: nowrap;
@@ -815,6 +876,12 @@ body::before {
 
 .result-actions {
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.result-actions-row1 {
+  display: flex;
   gap: 10px;
   width: 100%;
 }
@@ -822,13 +889,13 @@ body::before {
 .btn-mark-present {
   flex: 1;
   padding: 14px;
-  background: var(--accent);
-  color: #000;
+  background: linear-gradient(135deg, var(--mtrh-maroon, #8B1A27) 0%, #6B1220 100%);
+  color: #fff;
   border: none;
   border-radius: var(--radius-md);
   font-size: 15px;
   font-weight: 700;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Roboto', 'Inter', sans-serif;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -836,12 +903,12 @@ body::before {
   gap: 8px;
   transition: box-shadow var(--transition), transform var(--transition);
 }
-.btn-mark-present:hover { box-shadow: 0 0 20px var(--accent-glow); }
+.btn-mark-present:hover { box-shadow: 0 0 20px rgba(139,26,39,0.5); }
 .btn-mark-present:active { transform: scale(0.97); }
 .btn-mark-present.already-present {
   background: var(--bg-elevated);
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
+  color: var(--mtrh-maroon, #8B1A27);
+  border: 1.5px solid var(--mtrh-maroon, #8B1A27);
 }
 .mark-icon { font-size: 18px; font-weight: 800; }
 
@@ -858,6 +925,32 @@ body::before {
   transition: background var(--transition);
 }
 .btn-cancel:hover { background: var(--bg-card-hover); }
+
+/* Remove PF from batch button */
+.btn-remove-pf {
+  width: 100%;
+  padding: 11px 16px;
+  background: rgba(139,26,39,0.12);
+  color: var(--mtrh-maroon, #8B1A27);
+  border: 1.5px solid rgba(139,26,39,0.5);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Roboto', 'Inter', sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+  letter-spacing: 0.2px;
+}
+.btn-remove-pf:hover {
+  background: rgba(139,26,39,0.22);
+  border-color: var(--mtrh-maroon, #8B1A27);
+  box-shadow: 0 0 12px rgba(139,26,39,0.25);
+}
+.btn-remove-pf:active { transform: scale(0.97); }
 
 /* ── Success State ── */
 .success-pulse {

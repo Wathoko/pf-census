@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#080d14" />
+  <meta name="theme-color" content="#8B1A27" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="PF Census" />
-  <meta name="description" content="Physical File Census Tracker — mark files as present, track locations, and generate weeding reports." />
-  <title>PF File Census</title>
+  <meta name="apple-mobile-web-app-title" content="MTRH PF Census" />
+  <meta name="description" content="MTRH Physical File Census Tracker — mark files as present, track locations, and generate weeding reports." />
+  <title>MTRH PF File Census</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -22,10 +22,19 @@
   <!-- ===== MAIN APP ===== -->
   <div id="main-app" class="hidden">
 
+    <!-- ── MTRH Brand Strip ── -->
+    <div class="mtrh-brand-strip">
+      <img src="mtrh_logo.png" alt="MTRH Logo" class="mtrh-brand-logo" />
+      <div class="mtrh-brand-text">
+        <div class="mtrh-brand-name">Moi Teaching &amp; Referral Hospital</div>
+        <div class="mtrh-brand-tagline">Excellence in Healthcare Delivery, Training and Research</div>
+      </div>
+    </div>
+
     <!-- ── Header ── -->
     <header class="app-header">
       <div class="header-left">
-        <span class="header-icon">📁</span>
+        <img src="mtrh_logo.png" alt="MTRH" class="header-logo" onerror="this.style.display='none'" />
         <div>
           <h1 class="header-title" id="header-user-name">PF Census</h1>
           <p class="header-batches" id="header-user-batches">Batches: Loading...</p>
@@ -279,6 +288,10 @@
               Mark as PRESENT
             </button>
             <button class="btn-cancel" onclick="clearResult()">Cancel</button>
+            <button class="btn-remove-pf" id="remove-pf-btn" onclick="confirmRemovePF()"
+              title="Remove this PF from your batch (use if PF was incorrectly included)">
+              🗑 Remove PF from My Batch
+            </button>
           </div>
         </div>
 

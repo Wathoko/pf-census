@@ -110,8 +110,8 @@ function renderLoginOverlay() {
   const overlay = document.getElementById('auth-overlay');
   overlay.innerHTML = `
     <div class="overlay-content">
-      <div class="app-logo">
-        <span class="logo-icon">📁</span>
+      <div class="app-logo" style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px;">
+        <img src="mtrh_logo.png" alt="MTRH Logo" class="mtrh-brand-logo" style="width: 72px; height: 72px; filter: drop-shadow(0 0 20px rgba(26,94,168,0.3));" onerror="this.style.display='none'" />
         <h1 class="logo-title">PF Census</h1>
         <p class="logo-subtitle">Physical File Tracker — ${getMonthLabel()}</p>
       </div>
@@ -196,8 +196,8 @@ function renderRegisterOverlay() {
 
   overlay.innerHTML = `
     <div class="overlay-content" style="max-height: 90vh; overflow-y: auto; padding-bottom: 24px; width: 100%; max-width: 440px;">
-      <div class="app-logo">
-        <span class="logo-icon">📝</span>
+      <div class="app-logo" style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px;">
+        <img src="mtrh_logo.png" alt="MTRH Logo" class="mtrh-brand-logo" style="width: 72px; height: 72px; filter: drop-shadow(0 0 20px rgba(26,94,168,0.3));" onerror="this.style.display='none'" />
         <h1 class="logo-title">Register</h1>
         <p class="logo-subtitle">Create your census account</p>
       </div>
@@ -1617,5 +1617,39 @@ async function saveMyBatches() {
     showToast('Failed to save: ' + e.message, 'error', '✕');
   }
 }
+
+// ── Remove PF from Batch ──────────────────────────────────────
+function confirmRemovePF() {
+  if (!state.currentResult) return;
+  const pf   = state.currentResult.pf;
+  const name = state.currentResult.name || 'this file';
+  
+  const msg = `⚠️ WARNING: This will permanently REMOVE PF ${pf} (${name}) from your batch sheet. \n\nUse this only if the PF was incorrectly included in your range or belongs to another colleague.\n\nAre you sure you want to proceed?`;
+  
+  if (window.confirm(msg)) {
+    removePF(pf);
+  }
+}
+
+async function removePF(pf) {
+  showLoading('Removing PF ' + pf + ' from your sheet…');
+  try {
+    const data = await apiPost('removepf', { pf });
+    hideLoading();
+    
+    // Clear result card
+    clearResult();
+    
+    // Show success toast
+    showToast(`PF ${pf} (${data.name || ''}) successfully removed from your batch!`, 'success', '🗑');
+    
+    // Refresh the app stats and search context
+    await loadStats();
+  } catch (e) {
+    hideLoading();
+    showToast('Error removing PF: ' + e.message, 'error', '✕');
+  }
+}
+
 
 
