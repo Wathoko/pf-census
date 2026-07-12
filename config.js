@@ -4,7 +4,7 @@
 const CONFIG = {
 
   // ── Permanent Apps Script URL (no setup required) ──────────
-  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwsuO1YJvsfNpNMG5387w33vT8YUYj70kM9IbBP8pv6JDgueUNHF3RtNZls6lkitjbA/exec',
+  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwt8_HVw_bdYdf6vDDXaZvvFCv9R-r3TxkoB11MGG4fwc3IsyfrepgFy5sgOLGvHxuC/exec',
 
   // ── Sheet Tab Names ────────────────────────────────────────
   SHEET_NAME:  'Main DBase',   // Master database tab
