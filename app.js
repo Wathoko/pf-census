@@ -969,7 +969,8 @@ function renderFileList(listId, emptyId, items, type) {
 
   items.forEach(item => {
     const li = document.createElement('li');
-    li.className = 'report-file-item rfi-' + type;
+    li.className = 'report-file-item clickable rfi-' + type;
+    li.onclick = () => selectFileFromReport(item.pf);
 
     if (type === 'missing') {
       const isCritical = (item.missingCount || 0) >= 2;
@@ -1012,6 +1013,13 @@ function renderFileList(listId, emptyId, items, type) {
     list.appendChild(li);
   });
 }
+
+function selectFileFromReport(pf) {
+  closeReportScreen();
+  document.getElementById('pf-input').value = pf;
+  doSearch(pf);
+}
+
 
 function setEl(id, val) {
   const el = document.getElementById(id);
@@ -1650,6 +1658,76 @@ async function removePF(pf) {
     showToast('Error removing PF: ' + e.message, 'error', '✕');
   }
 }
+
+// ── Barcode Scanner ──────────────────────────────────────────
+let html5QrScanner = null;
+
+async function startScanner() {
+  // Show scanner modal
+  document.getElementById('scanner-overlay').classList.add('active');
+  
+  // Clear any existing input
+  clearResult();
+  
+  // Initialize scanner
+  try {
+    html5QrScanner = new Html5Qrcode("scanner-reader");
+    
+    const config = { 
+      fps: 10, 
+      qrbox: (width, height) => {
+        // Barcode-style rectangular box (wider, shorter)
+        return { width: Math.round(width * 0.75), height: Math.round(height * 0.4) };
+      },
+      aspectRatio: 1.333333
+    };
+    
+    // Start camera stream (prefer back/environment camera)
+    await html5QrScanner.start(
+      { facingMode: "environment" }, 
+      config, 
+      (decodedText, decodedResult) => {
+        // On successful scan, close and process
+        stopScanner();
+        
+        // Clean scanned text: extract first sequence of digits
+        const pfMatch = decodedText.match(/\d+/);
+        if (pfMatch) {
+          const scannedPF = pfMatch[0];
+          document.getElementById('pf-input').value = scannedPF;
+          showToast('Scanned PF ' + scannedPF, 'success', '📷');
+          doSearch(scannedPF);
+        } else {
+          showToast('Could not find numeric PF in code: ' + decodedText, 'warning', '⚠️');
+        }
+      },
+      (errorMessage) => {
+        // Silent loop callback for scan frames
+      }
+    );
+  } catch (err) {
+    console.error("Camera scanner error:", err);
+    showToast("Camera access failed: " + err.message, "error", "✕");
+    stopScanner();
+  }
+}
+
+function stopScanner() {
+  document.getElementById('scanner-overlay').classList.remove('active');
+  if (html5QrScanner) {
+    try {
+      html5QrScanner.stop().then(() => {
+        html5QrScanner = null;
+      }).catch(e => {
+        console.warn("Scanner stop error:", e);
+        html5QrScanner = null;
+      });
+    } catch (e) {
+      html5QrScanner = null;
+    }
+  }
+}
+
 
 
 
