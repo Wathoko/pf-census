@@ -143,16 +143,59 @@ function renderLoginOverlay() {
   `;
 }
 
-function showRegisterScreen() {
+async function showRegisterScreen() {
   document.getElementById('auth-overlay').classList.add('active');
   document.getElementById('main-app').classList.add('hidden');
+  
+  // Show loading spinner inside auth-overlay while fetching PFs
+  const overlay = document.getElementById('auth-overlay');
+  overlay.innerHTML = `
+    <div class="overlay-content" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 40px 0;">
+      <div class="report-spinner"></div>
+      <p style="margin-top:16px; color:var(--text-secondary); font-size:14px;">Fetching PF list for batch configuration…</p>
+    </div>
+  `;
+
+  try {
+    const data = await apiFetch('getallpfs');
+    state.allPfs = data.pfs || [];
+  } catch (e) {
+    console.warn('Could not load PFs for dropdowns, falling back to manual text input:', e.message);
+    state.allPfs = [];
+  }
   renderRegisterOverlay();
 }
 
+
 function renderRegisterOverlay() {
   const overlay = document.getElementById('auth-overlay');
+  const hasPfs = Array.isArray(state.allPfs) && state.allPfs.length > 0;
+
+  let batchSelectorHTML = '';
+  if (hasPfs) {
+    batchSelectorHTML = `
+      <div class="input-group" style="margin-top: 8px;">
+        <label>Assigned Batch Ranges</label>
+        <div id="batch-ranges-container" class="batch-ranges-container">
+          <!-- Dynamic batch rows will be injected here -->
+        </div>
+        <button type="button" class="btn-secondary" style="width:100%; margin-top:8px; font-size:12px; padding:6px 12px;" onclick="addRegisterBatchRow()">
+          ＋ Add Batch Range
+        </button>
+      </div>
+    `;
+  } else {
+    batchSelectorHTML = `
+      <div class="input-group" style="margin-top: 8px;">
+        <label for="reg-batches">Assigned Batch Ranges</label>
+        <input type="text" id="reg-batches" class="form-input" placeholder="e.g. 3001-3500, 4000-4560" />
+        <p class="field-hint">Comma-separated ranges (From PF - To PF). Cannot overlap with other users.</p>
+      </div>
+    `;
+  }
+
   overlay.innerHTML = `
-    <div class="overlay-content" style="max-height: 90vh; overflow-y: auto; padding-bottom: 24px;">
+    <div class="overlay-content" style="max-height: 90vh; overflow-y: auto; padding-bottom: 24px; width: 100%; max-width: 440px;">
       <div class="app-logo">
         <span class="logo-icon">📝</span>
         <h1 class="logo-title">Register</h1>
@@ -176,23 +219,67 @@ function renderRegisterOverlay() {
           <label for="reg-mobile">Mobile Number</label>
           <input type="text" id="reg-mobile" class="form-input" placeholder="e.g. 0724333780" inputmode="numeric" />
         </div>
-        <div class="input-group" style="margin-top: 8px;">
-          <label for="reg-batches">Assigned Batch Ranges</label>
-          <input type="text" id="reg-batches" class="form-input" placeholder="e.g. 3001-3500, 4000-4560" />
-          <p class="field-hint">Comma-separated ranges. Batches cannot overlap with other users.</p>
-        </div>
+        
+        ${batchSelectorHTML}
+
         <p class="setup-url-hint" style="margin-top:16px;">
           Already registered?
           <a href="#" onclick="showLoginScreen(); return false;">Log in here →</a>
         </p>
       </div>
 
-      <button class="btn-primary" onclick="handleRegister()">
+      <button class="btn-primary" style="margin-top:16px;" onclick="handleRegister()">
         Register &amp; Create Tab
       </button>
     </div>
   `;
+
+  // Initialize with one batch row if dropdown mode is active
+  if (hasPfs) {
+    addRegisterBatchRow();
+  }
 }
+
+// Dynamic batch rows manager
+function addRegisterBatchRow() {
+  const container = document.getElementById('batch-ranges-container');
+  if (!container) return;
+
+  const rowId = 'batch-row-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'batch-row';
+  div.id = rowId;
+  div.style.display = 'flex';
+  div.style.alignItems = 'center';
+  div.style.gap = '8px';
+  div.style.marginTop = '6px';
+
+  // Build options list
+  let optionsHTML = '';
+  state.allPfs.forEach(pf => {
+    optionsHTML += `<option value="${pf}">PF ${pf}</option>`;
+  });
+
+  div.innerHTML = `
+    <select class="form-select batch-select-from" style="flex:1; padding:8px; font-size:13px;" aria-label="From PF">
+      ${optionsHTML}
+    </select>
+    <span style="color:var(--text-secondary); font-size:12px;">to</span>
+    <select class="form-select batch-select-to" style="flex:1; padding:8px; font-size:13px;" aria-label="To PF">
+      ${optionsHTML}
+    </select>
+    <button type="button" class="btn-remove-row" style="background:transparent; border:none; color:var(--danger); font-size:18px; padding:4px 8px; cursor:pointer;" onclick="document.getElementById('${rowId}').remove()" aria-label="Remove range">✕</button>
+  `;
+
+  container.appendChild(div);
+  
+  // Set default selection of the "To PF" select box to the last item
+  const toSelect = div.querySelector('.batch-select-to');
+  if (toSelect && toSelect.options.length > 0) {
+    toSelect.selectedIndex = toSelect.options.length - 1;
+  }
+}
+
 
 async function handleLogin() {
   const firstName = (document.getElementById('login-name')?.value.trim() || '').toUpperCase();
@@ -238,25 +325,59 @@ async function handleRegister() {
   const pfNumber  = (document.getElementById('reg-pf')?.value.trim()      || '');
   const idNumber  = (document.getElementById('reg-id')?.value.trim()      || '');
   const mobile    = (document.getElementById('reg-mobile')?.value.trim()  || '');
-  const batchStr  = (document.getElementById('reg-batches')?.value.trim() || '');
 
-  if (!firstName || !pfNumber || !idNumber || !mobile || !batchStr) {
+  if (!firstName || !pfNumber || !idNumber || !mobile) {
     showToast('All fields are required', 'warning', '⚠️');
     return;
   }
 
-  // Parse batch ranges: "3001-3500, 4000-4560" → [{from:'3001', to:'3500'}, ...]
-  const batches = batchStr.split(',').map(part => {
-    const m = part.trim().match(/(\d+)\s*[-–]\s*(\d+)/);
-    if (!m) throw new Error('Invalid batch range: "' + part.trim() + '". Use format: 3001-3500');
-    return { from: m[1], to: m[2] };
-  });
+  let batches = [];
+  const container = document.getElementById('batch-ranges-container');
+
+  if (container) {
+    // Dropdown mode
+    const rows = container.querySelectorAll('.batch-row');
+    for (const row of rows) {
+      const fromPF = row.querySelector('.batch-select-from')?.value;
+      const toPF   = row.querySelector('.batch-select-to')?.value;
+      if (!fromPF || !toPF) {
+        showToast('Please select From and To PFs for all ranges', 'warning', '⚠️');
+        return;
+      }
+      if (parseInt(fromPF, 10) > parseInt(toPF, 10)) {
+        showToast('Invalid range: PF ' + fromPF + ' is larger than PF ' + toPF, 'error', '✕');
+        return;
+      }
+      batches.push({ from: fromPF, to: toPF });
+    }
+    if (batches.length === 0) {
+      showToast('At least one batch range is required', 'warning', '⚠️');
+      return;
+    }
+  } else {
+    // Fallback textbox mode
+    const batchStr = document.getElementById('reg-batches')?.value.trim() || '';
+    if (!batchStr) {
+      showToast('Assigned batch ranges are required', 'warning', '⚠️');
+      return;
+    }
+    try {
+      batches = batchStr.split(',').map(part => {
+        const m = part.trim().match(/(\d+)\s*[-–]\s*(\d+)/);
+        if (!m) throw new Error('Invalid range style. Use e.g. 3001-3500');
+        return { from: m[1], to: m[2] };
+      });
+    } catch (e) {
+      showToast(e.message, 'error', '✕');
+      return;
+    }
+  }
 
   // Check for overlapping ranges in the list itself
   for (let i = 0; i < batches.length; i++) {
     for (let j = i + 1; j < batches.length; j++) {
       const a = batches[i], b = batches[j];
-      if (parseInt(a.from) <= parseInt(b.to) && parseInt(b.from) <= parseInt(a.to)) {
+      if (parseInt(a.from, 10) <= parseInt(b.to, 10) && parseInt(b.from, 10) <= parseInt(a.to, 10)) {
         showToast('Batch ranges overlap each other: ' + a.from + '-' + a.to + ' and ' + b.from + '-' + b.to, 'error', '✕');
         return;
       }
@@ -267,7 +388,9 @@ async function handleRegister() {
   try {
     const data = await apiPost('register', { firstName, pf: pfNumber, idNo: idNumber, mobile, batches });
     hideLoading();
-    showToast('Registered successfully! Please log in.', 'success', '✓');
+    
+    const count = data.count || 0;
+    showToast('Success! Created tab with ' + count + ' batch files.', 'success', '🎉');
     showLoginScreen();
   } catch (e) {
     hideLoading();

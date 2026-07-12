@@ -106,7 +106,9 @@ function doGet(e) {
     if (action === 'movementlog')      return ok(getMovementLog(pf));
     if (action === 'censustimeline')   return ok(getCensusTimeline(pf));
     if (action === 'compiledreport')   return ok(getCompiledReport(username, round));
+    if (action === 'getallpfs')         return ok(getAllPFs());
     if (action === 'ping')             return ok({ message: 'PF Census backend is online', month: currentMonth(), isAdmin: isSuperAdmin(username) });
+
 
     return err('Unknown action: ' + action);
   } catch (ex) {
@@ -150,9 +152,10 @@ function registerUser(p) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Check duplicates across all user sheets
+  // Check duplicate PF across other users (excluding this user)
   const allSheets = ss.getSheets();
   for (const sh of allSheets) {
+    if (sh.getName().toUpperCase() === firstName) continue; // skip own sheet
     const meta = sh.getDeveloperMetadata();
     for (const m of meta) {
       if (m.getKey() === 'pf' && m.getValue() === pf)
@@ -160,39 +163,140 @@ function registerUser(p) {
     }
   }
 
-  // Create or open user tab
-  let userSheet = ss.getSheetByName(firstName);
-  if (!userSheet) {
-    const master = ss.getSheetByName('Main DBase');
-    if (!master) throw new Error('"Main DBase" tab not found');
-
-    // Copy master data to user tab
-    userSheet = ss.insertSheet(firstName);
-    const masterData = master.getDataRange().getValues();
-    userSheet.getRange(1, 1, masterData.length, masterData[0].length).setValues(masterData);
-    // Add extra column headers
-    userSheet.getRange(1, COL_FLAG).setValue('CENSUS FLAG');
-    userSheet.getRange(1, COL_CUSTODY).setValue('CUSTODY LOCATION');
-    userSheet.getRange(1, COL_ROUND).setValue('CENSUS ROUND');
-    userSheet.getRange(1, COL_FILE_STATUS).setValue('FILE STATUS');
-    userSheet.getRange(1, COL_MISSING_CNT).setValue('MISSING COUNT');
-    userSheet.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1a2035').setFontColor('#ffffff');
+  // Find user sheet case-insensitively
+  let userSheet = null;
+  for (const sh of allSheets) {
+    if (sh.getName().toUpperCase() === firstName) {
+      userSheet = sh;
+      break;
+    }
   }
 
-  // Store metadata
+  // Backup existing markings if the sheet already exists
+  const markingsBackup = {};
+  if (userSheet) {
+    const existingData = userSheet.getDataRange().getValues();
+    // Start from row 2 (row index 1)
+    for (let i = 1; i < existingData.length; i++) {
+      const rowPF = normalizePF(existingData[i][COL_PF - 1]);
+      if (!rowPF) continue;
+      markingsBackup[rowPF] = {
+        datetime:     existingData[i][COL_DATETIME - 1],
+        flag:         existingData[i][COL_FLAG - 1],
+        custody:      existingData[i][COL_CUSTODY - 1],
+        round:        existingData[i][COL_ROUND - 1],
+        fileStatus:   existingData[i][COL_FILE_STATUS - 1],
+        missingCount: existingData[i][COL_MISSING_CNT - 1],
+      };
+    }
+  }
+
+  const master = ss.getSheetByName('Main DBase');
+  if (!master) throw new Error('"Main DBase" tab not found');
+  const masterData = master.getDataRange().getValues();
+  if (masterData.length < 2) throw new Error('"Main DBase" sheet contains no data rows');
+
+  // Filter master rows matching the user's batches
+  const filteredRows = [];
+  // Row 1 = header row
+  const masterHeader = masterData[0];
+  
+  for (let i = 1; i < masterData.length; i++) {
+    const empPF = normalizePF(masterData[i][COL_PF - 1]);
+    const empVal = parseInt(empPF, 10);
+    if (isNaN(empVal)) continue;
+
+    // Check if employee falls inside any of the user's batch ranges
+    const match = batches.some(b => empVal >= parseInt(b.from, 10) && empVal <= parseInt(b.to, 10));
+    if (!match) continue;
+
+    const backup = markingsBackup[empPF] || {};
+    
+    // Construct the 10-column row format:
+    // A=PF, B=HR Status, C=Name, D=Phone, E=DateTime, F=Flag, G=Custody, H=Round, I=FileStatus, J=MissingCount
+    const row = new Array(10).fill('');
+    row[COL_PF - 1]          = masterData[i][COL_PF - 1];          // A
+    row[COL_HR_STATUS - 1]   = masterData[i][COL_HR_STATUS - 1];   // B
+    row[COL_NAME - 1]        = masterData[i][COL_NAME - 1];        // C
+    row[COL_PHONE - 1]       = masterData[i][COL_PHONE - 1];       // D
+    row[COL_DATETIME - 1]    = backup.datetime || '';              // E
+    row[COL_FLAG - 1]        = backup.flag || '';                  // F
+    row[COL_CUSTODY - 1]     = backup.custody || '';               // G
+    row[COL_ROUND - 1]       = backup.round || '';                 // H
+    row[COL_FILE_STATUS - 1] = backup.fileStatus || 'ACTIVE';      // I
+    row[COL_MISSING_CNT - 1] = backup.missingCount !== undefined ? backup.missingCount : 0; // J
+
+    filteredRows.push(row);
+  }
+
+  // Create or clear userSheet
+  if (!userSheet) {
+    // Insert sheet with camel-cased name for better aesthetics (e.g. Margaret vs MARGARET)
+    const formattedName = firstName.charAt(0) + firstName.slice(1).toLowerCase();
+    userSheet = ss.insertSheet(formattedName);
+  } else {
+    // If it exists, clear everything to rebuild it
+    userSheet.clear();
+  }
+
+  // Write headers
+  const newHeader = new Array(10).fill('');
+  newHeader[COL_PF - 1]          = masterHeader[COL_PF - 1] || 'PF Number';
+  newHeader[COL_HR_STATUS - 1]   = masterHeader[COL_HR_STATUS - 1] || 'HR Status';
+  newHeader[COL_NAME - 1]        = masterHeader[COL_NAME - 1] || 'Employee Name';
+  newHeader[COL_PHONE - 1]       = masterHeader[COL_PHONE - 1] || 'Phone';
+  newHeader[COL_DATETIME - 1]    = 'DATE_TIME';
+  newHeader[COL_FLAG - 1]        = 'CENSUS FLAG';
+  newHeader[COL_CUSTODY - 1]     = 'CUSTODY LOCATION';
+  newHeader[COL_ROUND - 1]       = 'CENSUS ROUND';
+  newHeader[COL_FILE_STATUS - 1] = 'FILE STATUS';
+  newHeader[COL_MISSING_CNT - 1] = 'MISSING COUNT';
+
+  userSheet.getRange(1, 1, 1, 10).setValues([newHeader]);
+
+  // Write filtered rows (if any)
+  if (filteredRows.length > 0) {
+    userSheet.getRange(2, 1, filteredRows.length, 10).setValues(filteredRows);
+  }
+
+  // Store metadata (delete existing metadata of the same key first to prevent duplicates)
+  userSheet.getDeveloperMetadata().forEach(m => m.remove());
   userSheet.addDeveloperMetadata('pf',       pf);
   userSheet.addDeveloperMetadata('mobile',   mobile);
   userSheet.addDeveloperMetadata('idNo',     idNo);
   userSheet.addDeveloperMetadata('batches',  JSON.stringify(batches));
   userSheet.addDeveloperMetadata('firstName',firstName);
 
-  // Write batch ranges into the header cell for display
+  // Write batch ranges to L1
   const batchStr = batches.map(b => 'PF ' + b.from + '–' + b.to).join(', ');
   userSheet.getRange(1, 12).setValue('Batches: ' + batchStr);
 
+  // Style header row
+  userSheet.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1a2035').setFontColor('#ffffff');
+
   SpreadsheetApp.flush();
-  return { username: firstName, batches: batchStr };
+  return { username: firstName, batches: batchStr, count: filteredRows.length };
 }
+
+// ── getAllPFs ────────────────────────────────────────────────
+// Returns a sorted list of all unique PF numbers in Main DBase.
+function getAllPFs() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const master = ss.getSheetByName('Main DBase');
+  if (!master) return { pfs: [] };
+
+  const data = master.getDataRange().getValues();
+  const pfs = [];
+  for (let i = DATA_START_ROW - 1; i < data.length; i++) {
+    const pf = normalizePF(data[i][COL_PF - 1]);
+    if (pf && !pfs.includes(pf)) {
+      pfs.push(pf);
+    }
+  }
+  pfs.sort((a, b) => parseInt(a) - parseInt(b));
+  return { pfs };
+}
+
 
 // ── loginUser ────────────────────────────────────────────────
 function loginUser(p) {
