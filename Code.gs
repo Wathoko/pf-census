@@ -127,12 +127,14 @@ function doPost(e) {
     if (action === 'markpresent')     return ok(markPresent(body));
     if (action === 'runaudit')        return ok(runAudit(body));
     if (action === 'updatelocation')  return ok(updateLocation(body));
+    if (action === 'updatebatches')    return ok(updateBatches(body));
 
     return err('Unknown action: ' + action);
   } catch (ex) {
     return err(ex.message);
   }
 }
+
 
 // ── registerUser ─────────────────────────────────────────────
 function registerUser(p) {
@@ -277,6 +279,136 @@ function registerUser(p) {
   SpreadsheetApp.flush();
   return { username: firstName, batches: batchStr, count: filteredRows.length };
 }
+
+// ── updateBatches ────────────────────────────────────────────
+// Standard colleague can update their batch ranges. Rebuilds sheet, preserves markings.
+function updateBatches(p) {
+  const username = String(p.username || '').trim().toUpperCase();
+  const batches  = (p.batches  || []).map(b => ({
+    from: normalizePF(b.from),
+    to:   normalizePF(b.to)
+  }));
+
+  if (!username) throw new Error('Username required');
+  if (!batches.length) throw new Error('At least one batch range is required');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allSheets = ss.getSheets();
+
+  // Find user sheet case-insensitively
+  let userSheet = null;
+  for (const sh of allSheets) {
+    if (sh.getName().toUpperCase() === username) {
+      userSheet = sh;
+      break;
+    }
+  }
+  if (!userSheet) throw new Error('User sheet not found');
+
+  // Verify batches don't overlap with OTHER users
+  for (const sh of allSheets) {
+    if (sh.getName().toUpperCase() === username) continue; // skip own sheet
+    const meta = sh.getDeveloperMetadata();
+    for (const m of meta) {
+      if (m.getKey() === 'batches') {
+        const otherBatches = JSON.parse(m.getValue() || '[]');
+        for (const a of batches) {
+          for (const b of otherBatches) {
+            if (parseInt(a.from, 10) <= parseInt(b.to, 10) && parseInt(b.from, 10) <= parseInt(a.to, 10)) {
+              throw new Error('Batch range ' + a.from + '-' + a.to + ' overlaps with ' + sh.getName() + '\'s batch: ' + b.from + '-' + b.to);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Backup existing markings
+  const markingsBackup = {};
+  const existingData = userSheet.getDataRange().getValues();
+  for (let i = 1; i < existingData.length; i++) {
+    const rowPF = normalizePF(existingData[i][COL_PF - 1]);
+    if (!rowPF) continue;
+    markingsBackup[rowPF] = {
+      datetime:     existingData[i][COL_DATETIME - 1],
+      flag:         existingData[i][COL_FLAG - 1],
+      custody:      existingData[i][COL_CUSTODY - 1],
+      round:        existingData[i][COL_ROUND - 1],
+      fileStatus:   existingData[i][COL_FILE_STATUS - 1],
+      missingCount: existingData[i][COL_MISSING_CNT - 1],
+    };
+  }
+
+  const master = ss.getSheetByName('Main DBase');
+  if (!master) throw new Error('"Main DBase" tab not found');
+  const masterData = master.getDataRange().getValues();
+  const masterHeader = masterData[0];
+
+  // Re-filter master rows matching the new batches
+  const filteredRows = [];
+  for (let i = 1; i < masterData.length; i++) {
+    const empPF = normalizePF(masterData[i][COL_PF - 1]);
+    const empVal = parseInt(empPF, 10);
+    if (isNaN(empVal)) continue;
+
+    const match = batches.some(b => empVal >= parseInt(b.from, 10) && empVal <= parseInt(b.to, 10));
+    if (!match) continue;
+
+    const backup = markingsBackup[empPF] || {};
+    const row = new Array(10).fill('');
+    row[COL_PF - 1]          = masterData[i][COL_PF - 1];
+    row[COL_HR_STATUS - 1]   = masterData[i][COL_HR_STATUS - 1];
+    row[COL_NAME - 1]        = masterData[i][COL_NAME - 1];
+    row[COL_PHONE - 1]       = masterData[i][COL_PHONE - 1];
+    row[COL_DATETIME - 1]    = backup.datetime || '';
+    row[COL_FLAG - 1]        = backup.flag || '';
+    row[COL_CUSTODY - 1]     = backup.custody || '';
+    row[COL_ROUND - 1]       = backup.round || '';
+    row[COL_FILE_STATUS - 1] = backup.fileStatus || 'ACTIVE';
+    row[COL_MISSING_CNT - 1] = backup.missingCount !== undefined ? backup.missingCount : 0;
+
+    filteredRows.push(row);
+  }
+
+  // Clear userSheet content
+  userSheet.clear();
+
+  // Write headers
+  const newHeader = new Array(10).fill('');
+  newHeader[COL_PF - 1]          = masterHeader[COL_PF - 1] || 'PF Number';
+  newHeader[COL_HR_STATUS - 1]   = masterHeader[COL_HR_STATUS - 1] || 'HR Status';
+  newHeader[COL_NAME - 1]        = masterHeader[COL_NAME - 1] || 'Employee Name';
+  newHeader[COL_PHONE - 1]       = masterHeader[COL_PHONE - 1] || 'Phone';
+  newHeader[COL_DATETIME - 1]    = 'DATE_TIME';
+  newHeader[COL_FLAG - 1]        = 'CENSUS FLAG';
+  newHeader[COL_CUSTODY - 1]     = 'CUSTODY LOCATION';
+  newHeader[COL_ROUND - 1]       = 'CENSUS ROUND';
+  newHeader[COL_FILE_STATUS - 1] = 'FILE STATUS';
+  newHeader[COL_MISSING_CNT - 1] = 'MISSING COUNT';
+  userSheet.getRange(1, 1, 1, 10).setValues([newHeader]);
+
+  // Write filtered rows
+  if (filteredRows.length > 0) {
+    userSheet.getRange(2, 1, filteredRows.length, 10).setValues(filteredRows);
+  }
+
+  // Update batches metadata
+  userSheet.getDeveloperMetadata().forEach(m => {
+    if (m.getKey() === 'batches') m.remove();
+  });
+  userSheet.addDeveloperMetadata('batches', JSON.stringify(batches));
+
+  // Write batch ranges to L1
+  const batchStr = batches.map(b => 'PF ' + b.from + '–' + b.to).join(', ');
+  userSheet.getRange(1, 12).setValue('Batches: ' + batchStr);
+
+  // Style header row
+  userSheet.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1a2035').setFontColor('#ffffff');
+
+  SpreadsheetApp.flush();
+  return { batches: batchStr, count: filteredRows.length };
+}
+
 
 // ── getAllPFs ────────────────────────────────────────────────
 // Returns a sorted list of all unique PF numbers in Main DBase.

@@ -53,11 +53,13 @@
       <button class="menu-item" onclick="openReportScreen('summary')">📊 Weeding Report</button>
       <button class="menu-item" onclick="openReportScreen('missing')">🚨 Missing File Alerts</button>
       <button class="menu-item" onclick="triggerAudit()">⚠️ Run Audit</button>
+      <button class="menu-item" id="menu-edit-batches" onclick="openEditBatchesModal()">✏️ Edit My Batches</button>
       <button class="menu-item" onclick="openSettings()">⚙️ Column Settings</button>
       <button class="menu-item" onclick="refreshData()">🔄 Refresh Data</button>
       <hr class="menu-divider" />
       <button class="menu-item danger" onclick="handleLogout()">🚪 Logout Colleague</button>
     </div>
+
 
     <!-- ── Stats Bar ── -->
     <div class="stats-bar" role="status" aria-label="Census progress">
@@ -486,8 +488,35 @@
     </div>
   </div>
 
+  <!-- ===== EDIT BATCHES MODAL ===== -->
+  <div id="edit-batches-modal" class="modal hidden" role="dialog" aria-label="Edit My Batches">
+    <div class="modal-backdrop" onclick="closeEditBatchesModal()"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>✏️ Edit My Batches</h2>
+        <button class="modal-close" onclick="closeEditBatchesModal()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Add, remove, or modify your assigned batch ranges. Your existing sighting markings will be preserved!
+        </p>
+        <div id="edit-batch-ranges-container" class="batch-ranges-container">
+          <!-- Dynamic select rows injected here -->
+        </div>
+        <button type="button" class="btn-secondary" style="width:100%; margin-top:8px; font-size:12px; padding:6px 12px;" onclick="addEditBatchRow()">
+          ＋ Add Batch Range
+        </button>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeEditBatchesModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveMyBatches()">Save &amp; Apply</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== TOAST CONTAINER ===== -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
 
   <!-- ===== LOADING OVERLAY ===== -->
   <div id="loading-overlay" class="loading-overlay hidden" aria-busy="true">

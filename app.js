@@ -1457,3 +1457,165 @@ function renderCensusTimeline(data) {
   wrap.appendChild(rail);
 }
 
+// ── Edit Batches Modal ────────────────────────────────────────
+async function openEditBatchesModal() {
+  closeUserMenu();
+  const modal = document.getElementById('edit-batches-modal');
+  if (!modal) return;
+
+  const container = document.getElementById('edit-batch-ranges-container');
+  if (container) container.innerHTML = '';
+
+  modal.classList.remove('hidden');
+
+  // Load PFs if not already loaded
+  if (!Array.isArray(state.allPfs) || state.allPfs.length === 0) {
+    showLoading('Fetching PF list for batch configuration…');
+    try {
+      const data = await apiFetch('getallpfs');
+      state.allPfs = data.pfs || [];
+    } catch (e) {
+      console.warn('Could not load PFs for dropdowns, using textboxes:', e.message);
+      state.allPfs = [];
+    }
+    hideLoading();
+  }
+
+  // Populate container with current user batches
+  if (state.currentUser && Array.isArray(state.currentUser.batches)) {
+    state.currentUser.batches.forEach(b => {
+      addEditBatchRow(b.from, b.to);
+    });
+  }
+
+  // Fallback: If no ranges exist yet, add one blank row
+  if (container && container.children.length === 0) {
+    addEditBatchRow();
+  }
+}
+
+function closeEditBatchesModal() {
+  document.getElementById('edit-batches-modal')?.classList.add('hidden');
+}
+
+function addEditBatchRow(fromVal = '', toVal = '') {
+  const container = document.getElementById('edit-batch-ranges-container');
+  if (!container) return;
+
+  const hasPfs = Array.isArray(state.allPfs) && state.allPfs.length > 0;
+  const rowId = 'edit-batch-row-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'batch-row';
+  div.id = rowId;
+  div.style.display = 'flex';
+  div.style.alignItems = 'center';
+  div.style.gap = '8px';
+  div.style.marginTop = '6px';
+
+  if (hasPfs) {
+    let optionsFrom = '';
+    let optionsTo   = '';
+    state.allPfs.forEach(pf => {
+      const isSelFrom = pf === fromVal ? 'selected' : '';
+      const isSelTo   = pf === toVal ? 'selected' : '';
+      optionsFrom += `<option value="${pf}" ${isSelFrom}>PF ${pf}</option>`;
+      optionsTo   += `<option value="${pf}" ${isSelTo}>PF ${pf}</option>`;
+    });
+
+    div.innerHTML = `
+      <select class="form-select batch-select-from" style="flex:1; padding:8px; font-size:13px;" aria-label="From PF">
+        ${optionsFrom}
+      </select>
+      <span style="color:var(--text-secondary); font-size:12px;">to</span>
+      <select class="form-select batch-select-to" style="flex:1; padding:8px; font-size:13px;" aria-label="To PF">
+        ${optionsTo}
+      </select>
+      <button type="button" class="btn-remove-row" style="background:transparent; border:none; color:var(--danger); font-size:18px; padding:4px 8px; cursor:pointer;" onclick="document.getElementById('${rowId}').remove()" aria-label="Remove range">✕</button>
+    `;
+  } else {
+    div.innerHTML = `
+      <input type="text" class="form-input batch-select-from" style="flex:1; padding:8px; font-size:13px;" placeholder="From e.g. 3001" value="${escHtml(fromVal)}" aria-label="From PF" />
+      <span style="color:var(--text-secondary); font-size:12px;">to</span>
+      <input type="text" class="form-input batch-select-to" style="flex:1; padding:8px; font-size:13px;" placeholder="To e.g. 3500" value="${escHtml(toVal)}" aria-label="To PF" />
+      <button type="button" class="btn-remove-row" style="background:transparent; border:none; color:var(--danger); font-size:18px; padding:4px 8px; cursor:pointer;" onclick="document.getElementById('${rowId}').remove()" aria-label="Remove range">✕</button>
+    `;
+  }
+
+  container.appendChild(div);
+
+  // Set defaults for blank dropdowns
+  if (hasPfs && !fromVal && !toVal) {
+    const fromSelect = div.querySelector('.batch-select-from');
+    const toSelect   = div.querySelector('.batch-select-to');
+    if (fromSelect && toSelect && toSelect.options.length > 0) {
+      toSelect.selectedIndex = toSelect.options.length - 1;
+    }
+  }
+}
+
+async function saveMyBatches() {
+  const container = document.getElementById('edit-batch-ranges-container');
+  if (!container) return;
+
+  const rows = container.querySelectorAll('.batch-row');
+  const batches = [];
+
+  for (const row of rows) {
+    const fromPF = row.querySelector('.batch-select-from')?.value.trim();
+    const toPF   = row.querySelector('.batch-select-to')?.value.trim();
+    if (!fromPF || !toPF) {
+      showToast('All fields in ranges are required', 'warning', '⚠️');
+      return;
+    }
+    const cleanFrom = normalizePF(fromPF);
+    const cleanTo   = normalizePF(toPF);
+    if (!cleanFrom || !cleanTo) {
+      showToast('Invalid PF number format', 'error', '✕');
+      return;
+    }
+    if (parseInt(cleanFrom, 10) > parseInt(cleanTo, 10)) {
+      showToast('Invalid range: PF ' + cleanFrom + ' is larger than PF ' + cleanTo, 'error', '✕');
+      return;
+    }
+    batches.push({ from: cleanFrom, to: cleanTo });
+  }
+
+  if (batches.length === 0) {
+    showToast('At least one batch range is required', 'warning', '⚠️');
+    return;
+  }
+
+  // Check for overlaps in the list itself
+  for (let i = 0; i < batches.length; i++) {
+    for (let j = i + 1; j < batches.length; j++) {
+      const a = batches[i], b = batches[j];
+      if (parseInt(a.from, 10) <= parseInt(b.to, 10) && parseInt(b.from, 10) <= parseInt(a.to, 10)) {
+        showToast('Ranges overlap each other: ' + a.from + '-' + a.to + ' and ' + b.from + '-' + b.to, 'error', '✕');
+        return;
+      }
+    }
+  }
+
+  showLoading('Saving new batch configurations…');
+  try {
+    const data = await apiPost('updatebatches', { batches });
+    hideLoading();
+
+    // Update state and localStorage
+    if (state.currentUser) {
+      state.currentUser.batches = batches;
+      localStorage.setItem('pfcensus_user', JSON.stringify(state.currentUser));
+    }
+
+    closeEditBatchesModal();
+    showMainApp();
+    await loadStats();
+
+    showToast('Success! Loaded ' + data.count + ' files in new batches.', 'success', '🎉');
+  } catch (e) {
+    hideLoading();
+    showToast('Failed to save: ' + e.message, 'error', '✕');
+  }
+}
+
+
